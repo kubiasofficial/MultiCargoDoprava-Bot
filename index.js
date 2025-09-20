@@ -884,90 +884,112 @@ client.on('messageCreate', async message => {
         const args = message.content.slice('!odjezdy2'.length).trim().split(' ');
         const stationId = args[0];
 
-        if (!stationId || isNaN(stationId)) {
-            message.reply('❌ Zadejte platné ID stanice. Příklad: `!odjezdy2 4824` (Warszawa Wschodnia)');
+        if (!stationId) {
+            message.reply('❌ Zadejte ID stanice. Příklad: `!odjezdy2 4824` (Warszawa Wschodnia)');
             return;
         }
 
         try {
+            console.log(`🔍 Začínám načítání JSON API pro stanici ${stationId}`);
+            
             // Nové JSON API místo HTML parsingu
             const response = await axios.get(`https://api1.aws.simrail.eu:8082/api/getEDRTimetables?serverCode=cz1`);
             const trains = response.data;
             
-            console.log(`🔍 JSON API: Získáno ${trains.length} vlaků pro analýzu odjezdů`);
+            console.log(`� JSON API: Získáno ${trains.length} vlaků`);
+            
+            // Debug - ukáž prvních pár vlaků
+            if (trains.length > 0) {
+                console.log(`🚂 První vlak: ${trains[0].trainNoLocal} (${trains[0].trainName}) ${trains[0].startStation} → ${trains[0].endStation}`);
+                if (trains[0].timetable && trains[0].timetable.length > 0) {
+                    console.log(`📍 První zastávka: ${trains[0].timetable[0].nameForPerson} (ID: ${trains[0].timetable[0].pointId})`);
+                }
+            }
             
             // Najdi všechny odjezdy z této stanice
             let odjezdyData = [];
+            let foundStations = new Set();
             const currentTime = new Date();
             
             for (const train of trains) {
                 if (train.timetable && Array.isArray(train.timetable)) {
                     for (const stop of train.timetable) {
+                        // Sbírej všechny ID stanic pro debug
+                        foundStations.add(`${stop.pointId}:${stop.nameForPerson}`);
+                        
                         // Hledáme stanici podle pointId a pouze odjezdy (departureTime)
                         if (stop.pointId === stationId && stop.departureTime) {
                             const departureTime = new Date(stop.departureTime);
                             const actualDepartureTime = stop.actualDepartureTime ? new Date(stop.actualDepartureTime) : null;
                             
-                            // Zobraz pouze budoucí odjezdy
+                            console.log(`🕐 Nalezen odjezd: ${train.trainNoLocal} v ${stop.departureTime} ze stanice ${stop.nameForPerson}`);
+                            
+                            // Zobraz VŠECHNY odjezdy (nefiltruj podle času pro debug)
                             const timeToShow = actualDepartureTime || departureTime;
-                            if (timeToShow > currentTime) {
-                                const timeString = timeToShow.toLocaleTimeString('cs-CZ', { 
-                                    hour: '2-digit', 
-                                    minute: '2-digit' 
-                                });
-                                
-                                const platform = stop.platform ? ` | 🛤️ ${stop.track || stop.platform}` : '';
-                                const delay = actualDepartureTime && actualDepartureTime > departureTime ? 
-                                    ` | ⏰ +${Math.round((actualDepartureTime - departureTime) / 60000)} min` : '';
-                                
-                                odjezdyData.push({
-                                    time: timeToShow,
-                                    text: `🕐 **${timeString}** | 🚂 ${train.trainNoLocal} (${train.trainName || train.trainType || 'N/A'}) | 📍 → ${train.endStation}${platform}${delay}`
-                                });
-                            }
+                            const timeString = timeToShow.toLocaleTimeString('cs-CZ', { 
+                                hour: '2-digit', 
+                                minute: '2-digit' 
+                            });
+                            
+                            const platform = stop.platform ? ` | 🛤️ ${stop.track || stop.platform}` : '';
+                            const delay = actualDepartureTime && actualDepartureTime > departureTime ? 
+                                ` | ⏰ +${Math.round((actualDepartureTime - departureTime) / 60000)} min` : '';
+                            const futureIndicator = timeToShow > currentTime ? '🟢' : '🔴';
+                            
+                            odjezdyData.push({
+                                time: timeToShow,
+                                text: `${futureIndicator} **${timeString}** | 🚂 ${train.trainNoLocal} (${train.trainName || train.trainType || 'N/A'}) | 📍 → ${train.endStation}${platform}${delay}`
+                            });
                         }
                     }
                 }
             }
             
-            // Seřaď podle času a vezmi prvních 5
+            // Seřaď podle času a vezmi prvních 10 (pro debug)
             odjezdyData.sort((a, b) => a.time - b.time);
-            odjezdyData = odjezdyData.slice(0, 5);
+            
+            console.log(`🎯 Nalezeno ${odjezdyData.length} odjezdů pro stanici ${stationId}`);
             
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
-                .setTitle(`⏰ Nejbližších 5 odjezdů - NOVÉ JSON API (ID: ${stationId})`)
-                .setDescription('🚂 Testovací verze s JSON API (místo HTML parsingu)')
-                .setFooter({ text: 'MultiCargo Doprava • JSON EDR API • BETA' })
+                .setTitle(`⏰ Debug odjezdy - JSON API (ID: ${stationId})`)
+                .setDescription('🚂 Testovací verze s rozšířeným debugem')
+                .setFooter({ text: 'MultiCargo Doprava • JSON EDR API • DEBUG' })
                 .setTimestamp();
 
             if (odjezdyData.length > 0) {
                 const stationName = trains.find(t => t.timetable && t.timetable.some(s => s.pointId === stationId))?.timetable.find(s => s.pointId === stationId)?.nameForPerson || 'Neznámá';
                 
+                // Zobraz až 10 odjezdů pro debug
+                const odjezdyToShow = odjezdyData.slice(0, 10);
+                
                 embed.addFields({
                     name: `🚄 Odjezdy ze stanice ${stationName}`,
-                    value: odjezdyData.map(item => item.text).join('\n'),
+                    value: odjezdyToShow.map(item => item.text).join('\n').substring(0, 1000),
                     inline: false
                 });
             } else {
+                // Debug informace o dostupných stanicích
+                const availableStations = Array.from(foundStations).slice(0, 10);
+                
                 embed.addFields({
                     name: '❌ Žádné odjezdy',
-                    value: `Stanice ${stationId} momentálně nemá naplánované odjezdy v nejbližší době.\n\n💡 **Tip:** Zkuste jinou aktivní stanici:\n• \`!odjezdy2 4824\` - Warszawa Wschodnia\n• \`!odjezdy2 4250\` - Kraków Płaszów`,
+                    value: `Stanice ${stationId} nenalezena.\n\n� **Prvních 10 dostupných stanic:**\n${availableStations.map(s => `• ${s}`).join('\n')}`,
                     inline: false
                 });
             }
 
             embed.addFields({
-                name: '📊 Debug info',
-                value: `Celkem vlaků: ${trains.length}\nAnalyzováno ID: ${stationId}\nČas spuštění: ${new Date().toLocaleTimeString('cs-CZ')}`,
+                name: '📊 Debug statistiky',
+                value: `• Celkem vlaků: ${trains.length}\n• Hledané ID: ${stationId}\n• Nalezeno odjezdů: ${odjezdyData.length}\n• Celkem stanic: ${foundStations.size}`,
                 inline: false
             });
 
             message.channel.send({ embeds: [embed] });
 
         } catch (error) {
-            console.error('Chyba při načítání odjezdů z JSON API:', error);
-            message.reply('❌ Došlo k chybě při načítání odjezdů z JSON API. Zkontrolujte ID stanice nebo zkuste později.');
+            console.error('Chyba při načítání JSON API:', error.message);
+            message.reply(`❌ Chyba JSON API: ${error.message}`);
         }
     }
 
