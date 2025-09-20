@@ -648,7 +648,7 @@ client.on('messageCreate', async message => {
             .slice(0, 10); // Top 10
 
         if (sortedUsers.length === 0) {
-            message.reply('🏆 Žebříček je zatím prázdný! Začněte jezdit a získávejte body pomocí `!jizda [číslo]`');
+            message.reply('🏆 Žebříček je prozatím prázdný! Začněte jezdit a získávejte body pomocí `!jizda [číslo]`');
             return;
         }
 
