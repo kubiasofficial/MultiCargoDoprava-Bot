@@ -873,6 +873,49 @@ client.on('messageCreate', async message => {
         }
     }
 
+    // ===== VELMI JEDNODUCHÝ TEST !test123 =====
+    if (message.content === '!test123') {
+        const embed = new EmbedBuilder()
+            .setColor('#ff0000')
+            .setTitle('🔴 TEST - Bot je aktualizován!')
+            .setDescription('Tento příkaz potvrzuje, že nový kód funguje')
+            .addFields({
+                name: '✅ Status',
+                value: 'Bot má nejnovější verzi kódu',
+                inline: false
+            })
+            .setFooter({ text: 'Test deployment • ' + new Date().toISOString() })
+            .setTimestamp();
+            
+        message.channel.send({ embeds: [embed] });
+        return;
+    }
+
+    // ===== JEDNODUCHÝ API TEST !apitest =====
+    if (message.content === '!apitest') {
+        try {
+            const response = await axios.get(`https://api1.aws.simrail.eu:8082/api/getEDRTimetables?serverCode=cz1`);
+            const trains = response.data;
+            
+            const embed = new EmbedBuilder()
+                .setColor('#00ff00')
+                .setTitle('🟢 API TEST - JSON EDR funguje!')
+                .setDescription('Test přímého volání JSON API')
+                .addFields({
+                    name: '📊 Výsledek',
+                    value: `Získáno ${trains.length} vlaků z JSON API`,
+                    inline: false
+                })
+                .setFooter({ text: 'API Test • ' + new Date().toISOString() })
+                .setTimestamp();
+                
+            message.channel.send({ embeds: [embed] });
+        } catch (error) {
+            message.reply(`❌ API Test selhal: ${error.message}`);
+        }
+        return;
+    }
+
     // ===== TESTOVACÍ PŘÍKAZ !ODJEZDY2 (JSON API) =====
     if (message.content.startsWith('!odjezdy2')) {
         // Kontrola oprávnění - pouze výpravčí
