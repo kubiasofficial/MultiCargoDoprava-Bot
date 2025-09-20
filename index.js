@@ -10,7 +10,11 @@ const CONFIG = {
     ADMIN_ROLE_ID: '1418603886218051635', // ⭐ Vedení
     EMPLOYEE_ROLE_ID: '1418604088693882900', // 👔 Zaměstnanec
     CATEGORY_ID: '1418606519494246400', // Kategorie pro ticket kanály s přihláškami
-    DISPATCHER_CHANNEL_ID: '1418624695829532764' // Kanál pro zprávy o jízdách (dispatcher)
+    DISPATCHER_CHANNEL_ID: '1418624695829532764', // Kanál pro zprávy o jízdách (dispatcher)
+    
+    // Role pozic (budete muset přidat skutečné ID rolí)
+    STROJVUDCE_ROLE_ID: 'ID_ROLE_STROJVUDCE', // 🚂 Strojvůdce
+    VYPRAVCI_ROLE_ID: 'ID_ROLE_VYPRAVCI' // 🚉 Výpravčí
 };
 
 // ===== GOOGLE SHEETS KONFIGURACE =====
@@ -205,6 +209,16 @@ const commands = [
                     { name: '🔴 Červená (důležité)', value: '#ff0000' },
                     { name: '🟣 Fialová (události)', value: '#9932cc' }
                 )
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder()
+        .setName('setup-pozice')
+        .setDescription('Nastaví systém výběru pozic (strojvůdce/výpravčí) - pouze pro adminy')
+        .addChannelOption(option =>
+            option.setName('kanál')
+                .setDescription('Kanál kam poslat výběr pozic')
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText)
         )
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ];
@@ -853,10 +867,114 @@ client.on('interactionCreate', async interaction => {
                 });
             }
         }
+
+        if (interaction.commandName === 'setup-pozice') {
+            await interaction.deferReply({ ephemeral: true });
+            
+            // Zkontroluj admin oprávnění
+            if (!interaction.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+                await interaction.editReply({
+                    content: '❌ Nemáte oprávnění k používání tohoto příkazu!'
+                });
+                return;
+            }
+
+            const targetChannel = interaction.options.getChannel('kanál');
+
+            try {
+                const poziceEmbed = new EmbedBuilder()
+                    .setColor('#4285f4')
+                    .setTitle('🚂 Výběr pozice ve firmě')
+                    .setDescription('**Vyberte si svou pozici v MultiCargo Doprava!**\n\nKlikněte na tlačítko níže pro výběr nebo odebrání pozice.')
+                    .addFields(
+                        { name: '🚂 Strojvůdce', value: 'Řídíte vlaky a zajišťujete přepravu nákladu', inline: true },
+                        { name: '🚉 Výpravčí', value: 'Koordinujete provoz a dohlížíte na bezpečnost', inline: true },
+                        { name: '💡 Poznámka', value: 'Můžete mít pouze jednu pozici současně. Kliknutím na stejné tlačítko pozici odeberete.', inline: false }
+                    )
+                    .setThumbnail(interaction.guild.iconURL())
+                    .setFooter({ text: 'MultiCargo Doprava • Systém pozic' })
+                    .setTimestamp();
+
+                const strojvudceButton = new ButtonBuilder()
+                    .setCustomId('pozice_strojvudce')
+                    .setLabel('Strojvůdce')
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('🚂');
+
+                const vypravciButton = new ButtonBuilder()
+                    .setCustomId('pozice_vypravci')
+                    .setLabel('Výpravčí')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('🚉');
+
+                const row = new ActionRowBuilder().addComponents(strojvudceButton, vypravciButton);
+
+                await targetChannel.send({ embeds: [poziceEmbed], components: [row] });
+                
+                await interaction.editReply({
+                    content: `✅ Systém výběru pozic byl úspěšně nastaven v kanálu ${targetChannel}!`
+                });
+
+            } catch (error) {
+                console.error('Chyba při nastavování pozic:', error);
+                await interaction.editReply({
+                    content: '❌ Došlo k chybě při nastavování systému pozic. Zkontrolujte oprávnění bota.'
+                });
+            }
+        }
     }
 
     // ===== TLAČÍTKA =====
     if (!interaction.isButton()) return;
+
+    // Tlačítka pro výběr pozic
+    if (interaction.customId === 'pozice_strojvudce' || interaction.customId === 'pozice_vypravci') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const member = interaction.member;
+        const isStrojvudce = interaction.customId === 'pozice_strojvudce';
+        const targetRoleId = isStrojvudce ? CONFIG.STROJVUDCE_ROLE_ID : CONFIG.VYPRAVCI_ROLE_ID;
+        const otherRoleId = isStrojvudce ? CONFIG.VYPRAVCI_ROLE_ID : CONFIG.STROJVUDCE_ROLE_ID;
+        const poziceNazev = isStrojvudce ? '🚂 Strojvůdce' : '🚉 Výpravčí';
+        const otherPoziceNazev = isStrojvudce ? '🚉 Výpravčí' : '🚂 Strojvůdce';
+
+        try {
+            // Zkontroluj, jestli uživatel už má tuto roli
+            const hasTargetRole = member.roles.cache.has(targetRoleId);
+            const hasOtherRole = member.roles.cache.has(otherRoleId);
+
+            if (hasTargetRole) {
+                // Odeber roli
+                await member.roles.remove(targetRoleId);
+                await interaction.editReply({
+                    content: `✅ Pozice **${poziceNazev}** byla odebrána!`
+                });
+            } else {
+                // Odeber druhou pozici, pokud ji má
+                if (hasOtherRole) {
+                    await member.roles.remove(otherRoleId);
+                }
+                
+                // Přidej novou pozici
+                await member.roles.add(targetRoleId);
+                
+                let message = `✅ Byla vám přidělena pozice **${poziceNazev}**!`;
+                if (hasOtherRole) {
+                    message += `\n(Pozice **${otherPoziceNazev}** byla automaticky odebrána)`;
+                }
+                
+                await interaction.editReply({
+                    content: message
+                });
+            }
+
+        } catch (error) {
+            console.error('Chyba při změně pozice:', error);
+            await interaction.editReply({
+                content: '❌ Došlo k chybě při změně pozice. Zkontrolujte oprávnění bota.'
+            });
+        }
+    }
 
     // Tlačítko pro podání přihlášky
     if (interaction.customId === 'apply_button') {
