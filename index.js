@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, SlashCommandBuilder, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, SlashCommandBuilder, REST, Routes, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 const axios = require('axios'); // Potřebujeme pro volání API
 const { google } = require('googleapis');
@@ -14,7 +14,12 @@ const CONFIG = {
     
     // Role pozic (budete muset přidat skutečné ID rolí)
     STROJVUDCE_ROLE_ID: '1418875308811223123', // 🚂 Strojvůdce
-    VYPRAVCI_ROLE_ID: '1418875376855158825' // 🚉 Výpravčí
+    VYPRAVCI_ROLE_ID: '1418875376855158825', // 🚉 Výpravčí
+    
+    // Systém zakázek
+    ZAKAZKY_SETUP_CHANNEL_ID: '1418966879330111508', // Kanál kde se vytvoří embed pro zakázky
+    ZAKAZKY_CATEGORY_ID: '1418968983629074574', // Kategorie pro zakázkové kanály
+    ZAKAZKY_LOG_CATEGORY_ID: '1418969133936279623' // Kategorie pro log dokončených zakázek
 };
 
 // ===== GOOGLE SHEETS KONFIGURACE =====
@@ -98,6 +103,9 @@ async function zapisiJizduDoSheets(jizda, userName) {
 
 // Úložiště pro aktivní přihlášky
 const activeApplications = new Map();
+
+// Úložiště pro aktivní zakázky
+const activeZakazky = new Map(); // zakazkaId -> { channelId, vypravci, assignedUser, vlakCislo, created }
 
 // ===== DATABÁZE PRO SLEDOVÁNÍ JÍZD =====
 const aktivniJizdy = new Map(); // userId -> { vlakCislo, startCas, startStanice, cilStanice, trainName }
@@ -308,6 +316,46 @@ client.on('messageCreate', async message => {
 
         message.channel.send({ embeds: [helpEmbed] });
         return;
+    }
+
+    // ===== PŘÍKAZ PRO VYTVOŘENÍ SYSTÉMU ZAKÁZEK (pouze pro adminy) =====
+    if (message.content === '!setup-zakazky') {
+        // Zkontroluj oprávnění výpravčí nebo admin
+        if (!message.member.roles.cache.has(CONFIG.VYPRAVCI_ROLE_ID) && 
+            !message.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) && 
+            !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            message.reply('❌ Nemáte oprávnění k nastavení systému zakázek! Tento příkaz mohou používat pouze výpravčí.');
+            return;
+        }
+
+        const zakazkyEmbed = new EmbedBuilder()
+            .setColor('#e67e22')
+            .setTitle('📋 Systém přidělování zakázek')
+            .setDescription('**Výpravčí mohou přidělovat zakázky strojvůdcům**\n\nKlikněte na tlačítko níže pro vytvoření nové zakázky. Vyplníte komu zakázku přidělujete a číslo vlaku.')
+            .addFields(
+                { name: '👨‍💼 Kdo může přidělovat?', value: '• Pouze role **🚉 Výpravčí**\n• Vedení a administrátoři', inline: false },
+                { name: '📋 Jak to funguje?', value: '• Kliknete na "Vytvořit zakázku"\n• Vyplníte Discord ID uživatele\n• Zadáte číslo vlaku\n• Vytvoří se privátní kanál', inline: false },
+                { name: '🎯 Co se stane?', value: '• Uživatel dostane DM notifikaci\n• Otevře se mu zakázkový kanál\n• Po dokončení se kanál archivuje', inline: false }
+            )
+            .setThumbnail(message.guild.iconURL())
+            .setFooter({ text: 'MultiCargo Doprava • Systém zakázek' })
+            .setTimestamp();
+
+        const createButton = new ButtonBuilder()
+            .setCustomId('create_zakazka')
+            .setLabel('📝 Vytvořit zakázku')
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('🚂');
+
+        const row = new ActionRowBuilder().addComponents(createButton);
+
+        try {
+            await message.channel.send({ embeds: [zakazkyEmbed], components: [row] });
+            message.delete().catch(() => {}); // Smaž původní příkaz
+        } catch (error) {
+            console.error('Chyba při vytváření systému zakázek:', error);
+            message.reply('❌ Došlo k chybě při vytváření systému zakázek.');
+        }
     }
 
     // ===== PŘÍKAZ PRO VYTVOŘENÍ EMBED PŘIHLÁŠKY (pouze pro adminy) =====
@@ -1560,6 +1608,177 @@ client.on('messageCreate', async message => {
 
 // ===== HANDLER PRO INTERAKCE S TLAČÍTKY A SLASH PŘÍKAZY =====
 client.on('interactionCreate', async interaction => {
+    // ===== MODAL SUBMISSIONS =====
+    if (interaction.isModalSubmit()) {
+        if (interaction.customId === 'zakazka_modal') {
+            await interaction.deferReply({ ephemeral: true });
+
+            const userId = interaction.fields.getTextInputValue('zakazka_user_id');
+            const vlakCislo = interaction.fields.getTextInputValue('zakazka_vlak');
+            const poznamka = interaction.fields.getTextInputValue('zakazka_poznamka') || 'Bez poznámky';
+
+            // Validace Discord ID
+            if (!/^\d{17,19}$/.test(userId)) {
+                await interaction.editReply({
+                    content: '❌ Neplatné Discord ID! Musí být 17-19 číslic.'
+                });
+                return;
+            }
+
+            // Validace čísla vlaku
+            if (!/^\d+$/.test(vlakCislo)) {
+                await interaction.editReply({
+                    content: '❌ Neplatné číslo vlaku! Musí obsahovat pouze číslice.'
+                });
+                return;
+            }
+
+            try {
+                // Zkontroluj, jestli uživatel existuje
+                const targetUser = await client.users.fetch(userId).catch(() => null);
+                if (!targetUser) {
+                    await interaction.editReply({
+                        content: '❌ Uživatel s tímto Discord ID nebyl nalezen!'
+                    });
+                    return;
+                }
+
+                // Zkontroluj, jestli je uživatel na serveru
+                const targetMember = await interaction.guild.members.fetch(userId).catch(() => null);
+                if (!targetMember) {
+                    await interaction.editReply({
+                        content: '❌ Uživatel není členem tohoto serveru!'
+                    });
+                    return;
+                }
+
+                // Vytvoř jedinečné ID pro zakázku
+                const zakazkaId = `${Date.now()}-${vlakCislo}`;
+                const channelName = `zakázka-${vlakCislo}-${targetUser.username}`.toLowerCase();
+
+                // Vytvoř kanál pro zakázku
+                const zakazkaChannel = await interaction.guild.channels.create({
+                    name: channelName,
+                    type: ChannelType.GuildText,
+                    parent: CONFIG.ZAKAZKY_CATEGORY_ID,
+                    permissionOverwrites: [
+                        {
+                            id: interaction.guild.id, // @everyone
+                            deny: [PermissionFlagsBits.ViewChannel],
+                        },
+                        {
+                            id: userId, // Přidělený uživatel
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory
+                            ],
+                        },
+                        {
+                            id: interaction.user.id, // Výpravčí který vytvořil
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory
+                            ],
+                        },
+                        {
+                            id: CONFIG.ADMIN_ROLE_ID, // Admini
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory,
+                                PermissionFlagsBits.ManageMessages
+                            ],
+                        },
+                        {
+                            id: CONFIG.VYPRAVCI_ROLE_ID, // Výpravčí role
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory
+                            ],
+                        },
+                    ],
+                });
+
+                // Embed pro zakázkový kanál
+                const zakazkaEmbed = new EmbedBuilder()
+                    .setColor('#e67e22')
+                    .setTitle('🚂 Nová zakázka přidělena!')
+                    .setDescription(`Ahoj ${targetUser}! Byla vám přidělena nová zakázka.`)
+                    .addFields(
+                        { name: '🚂 Vlak', value: vlakCislo, inline: true },
+                        { name: '👨‍💼 Přidělil', value: interaction.user.tag, inline: true },
+                        { name: '📅 Vytvořeno', value: new Date().toLocaleString('cs-CZ'), inline: true },
+                        { name: '📝 Poznámka', value: poznamka, inline: false },
+                        { name: '💡 Instrukce', value: 'Po dokončení jízdy klikněte na tlačítko "Dokončit zakázku" níže.', inline: false }
+                    )
+                    .setFooter({ text: 'MultiCargo Doprava • Systém zakázek' })
+                    .setTimestamp();
+
+                const completeButton = new ButtonBuilder()
+                    .setCustomId(`complete_zakazka_${zakazkaId}`)
+                    .setLabel('✅ Dokončit zakázku')
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('🏁');
+
+                const cancelButton = new ButtonBuilder()
+                    .setCustomId(`cancel_zakazka_${zakazkaId}`)
+                    .setLabel('❌ Zrušit zakázku')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('🗑️');
+
+                const row = new ActionRowBuilder().addComponents(completeButton, cancelButton);
+
+                await zakazkaChannel.send({ 
+                    content: `${targetUser} • <@&${CONFIG.VYPRAVCI_ROLE_ID}>`,
+                    embeds: [zakazkaEmbed], 
+                    components: [row] 
+                });
+
+                // Ulož zakázku do mapy
+                activeZakazky.set(zakazkaId, {
+                    channelId: zakazkaChannel.id,
+                    vypravci: interaction.user,
+                    assignedUser: targetUser,
+                    vlakCislo: vlakCislo,
+                    poznamka: poznamka,
+                    created: Date.now()
+                });
+
+                // Pošli DM uživateli
+                try {
+                    const dmEmbed = new EmbedBuilder()
+                        .setColor('#e67e22')
+                        .setTitle('🚂 Nová zakázka!')
+                        .setDescription(`Byla vám přidělena nová zakázka na serveru **${interaction.guild.name}**.`)
+                        .addFields(
+                            { name: '🚂 Vlak', value: vlakCislo },
+                            { name: '👨‍💼 Přidělil', value: interaction.user.tag },
+                            { name: '📝 Poznámka', value: poznamka },
+                            { name: '🎯 Co dál?', value: `Pokračujte v kanálu ${zakazkaChannel}` }
+                        )
+                        .setTimestamp();
+
+                    await targetUser.send({ embeds: [dmEmbed] });
+                } catch (dmError) {
+                    console.log('Nepodařilo se poslat DM uživateli:', dmError.message);
+                }
+
+                await interaction.editReply({
+                    content: `✅ Zakázka byla úspěšně vytvořena! Kanál: ${zakazkaChannel}`
+                });
+
+            } catch (error) {
+                console.error('Chyba při vytváření zakázky:', error);
+                await interaction.editReply({
+                    content: '❌ Došlo k chybě při vytváření zakázky. Zkontrolujte oprávnění bota.'
+                });
+            }
+        }
+        return;
+    }
     // ===== SLASH PŘÍKAZY =====
     if (interaction.isChatInputCommand()) {
         if (interaction.commandName === 'oznámení') {
@@ -1829,6 +2048,203 @@ client.on('interactionCreate', async interaction => {
             
             await interaction.editReply({
                 content: '❌ Došlo k chybě při vytváření přihlášky. Kontaktujte administrátora.'
+            });
+        }
+    }
+
+    // Tlačítko pro vytvoření zakázky
+    if (interaction.customId === 'create_zakazka') {
+        // Zkontroluj oprávnění výpravčí
+        if (!interaction.member.roles.cache.has(CONFIG.VYPRAVCI_ROLE_ID) && 
+            !interaction.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) && 
+            !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            await interaction.reply({
+                content: '❌ Nemáte oprávnění k vytváření zakázek! Tento příkaz mohou používat pouze výpravčí.',
+                ephemeral: true
+            });
+            return;
+        }
+
+        // Vytvoř modal formulář
+        const modal = new ModalBuilder()
+            .setCustomId('zakazka_modal')
+            .setTitle('🚂 Nová zakázka pro strojvůdce');
+
+        // Input pro Discord ID
+        const userIdInput = new TextInputBuilder()
+            .setCustomId('zakazka_user_id')
+            .setLabel('Discord ID uživatele')
+            .setPlaceholder('Například: 123456789012345678')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(20);
+
+        // Input pro číslo vlaku
+        const vlakInput = new TextInputBuilder()
+            .setCustomId('zakazka_vlak')
+            .setLabel('Číslo vlaku')
+            .setPlaceholder('Například: 24111')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(10);
+
+        // Input pro poznámku (volitelné)
+        const poznamkaInput = new TextInputBuilder()
+            .setCustomId('zakazka_poznamka')
+            .setLabel('Poznámka k zakázce (volitelné)')
+            .setPlaceholder('Například: Důležitá přeprava, pozor na zpoždění...')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(false)
+            .setMaxLength(500);
+
+        const firstRow = new ActionRowBuilder().addComponents(userIdInput);
+        const secondRow = new ActionRowBuilder().addComponents(vlakInput);
+        const thirdRow = new ActionRowBuilder().addComponents(poznamkaInput);
+
+        modal.addComponents(firstRow, secondRow, thirdRow);
+
+        await interaction.showModal(modal);
+    }
+
+    // Tlačítka pro dokončení/zrušení zakázky
+    if (interaction.customId.startsWith('complete_zakazka_') || interaction.customId.startsWith('cancel_zakazka_')) {
+        const zakazkaId = interaction.customId.split('_').slice(2).join('_');
+        const isComplete = interaction.customId.startsWith('complete_zakazka_');
+        
+        await interaction.deferReply({ ephemeral: true });
+
+        // Najdi zakázku
+        const zakazka = activeZakazky.get(zakazkaId);
+        if (!zakazka) {
+            await interaction.editReply({
+                content: '❌ Zakázka nebyla nalezena nebo již byla dokončena.'
+            });
+            return;
+        }
+
+        // Zkontroluj oprávnění
+        const isAssignedUser = interaction.user.id === zakazka.assignedUser.id;
+        const isVypravci = interaction.member.roles.cache.has(CONFIG.VYPRAVCI_ROLE_ID);
+        const isAdmin = interaction.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) || 
+                       interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+
+        if (!isAssignedUser && !isVypravci && !isAdmin) {
+            await interaction.editReply({
+                content: '❌ Nemáte oprávnění k této akci!'
+            });
+            return;
+        }
+
+        try {
+            const channel = interaction.channel;
+            
+            if (isComplete) {
+                // Dokončení zakázky
+                await interaction.editReply({
+                    content: '✅ Zakázka byla označena jako dokončená! Kanál bude uzavřen za 10 sekund...'
+                });
+
+                // Vytvoř log kanál
+                const logChannelName = `log-${zakazka.vlakCislo}-${zakazka.assignedUser.username}`.toLowerCase();
+                const logChannel = await interaction.guild.channels.create({
+                    name: logChannelName,
+                    type: ChannelType.GuildText,
+                    parent: CONFIG.ZAKAZKY_LOG_CATEGORY_ID,
+                    permissionOverwrites: [
+                        {
+                            id: interaction.guild.id, // @everyone
+                            deny: [PermissionFlagsBits.ViewChannel],
+                        },
+                        {
+                            id: CONFIG.ADMIN_ROLE_ID, // Admini
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory
+                            ],
+                        },
+                        {
+                            id: CONFIG.VYPRAVCI_ROLE_ID, // Výpravčí
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory
+                            ],
+                        },
+                    ],
+                });
+
+                // Log embed
+                const logEmbed = new EmbedBuilder()
+                    .setColor('#27ae60')
+                    .setTitle('✅ Zakázka dokončena')
+                    .addFields(
+                        { name: '🚂 Vlak', value: zakazka.vlakCislo, inline: true },
+                        { name: '👨‍💼 Přidělil', value: zakazka.vypravci.tag, inline: true },
+                        { name: '🏁 Dokončil', value: interaction.user.tag, inline: true },
+                        { name: '📅 Vytvořeno', value: new Date(zakazka.created).toLocaleString('cs-CZ'), inline: true },
+                        { name: '✅ Dokončeno', value: new Date().toLocaleString('cs-CZ'), inline: true },
+                        { name: '⏱️ Doba trvání', value: `${Math.round((Date.now() - zakazka.created) / (1000 * 60))} minut`, inline: true },
+                        { name: '📝 Poznámka', value: zakazka.poznamka, inline: false }
+                    )
+                    .setFooter({ text: 'MultiCargo Doprava • Archiv zakázek' })
+                    .setTimestamp();
+
+                await logChannel.send({ embeds: [logEmbed] });
+
+                // Pošli DM s potvrzením
+                try {
+                    const completionDmEmbed = new EmbedBuilder()
+                        .setColor('#27ae60')
+                        .setTitle('✅ Zakázka dokončena!')
+                        .setDescription(`Vaše zakázka pro vlak **${zakazka.vlakCislo}** byla označena jako dokončená.`)
+                        .addFields(
+                            { name: '🏁 Dokončeno', value: new Date().toLocaleString('cs-CZ') },
+                            { name: '📋 Archiv', value: `Záznam uložen v kanálu ${logChannel}` }
+                        )
+                        .setTimestamp();
+
+                    await zakazka.assignedUser.send({ embeds: [completionDmEmbed] });
+                } catch (dmError) {
+                    console.log('Nepodařilo se poslat DM o dokončení:', dmError.message);
+                }
+
+            } else {
+                // Zrušení zakázky
+                await interaction.editReply({
+                    content: '❌ Zakázka byla zrušena! Kanál bude uzavřen za 10 sekund...'
+                });
+
+                // Pošli DM o zrušení
+                try {
+                    const cancelDmEmbed = new EmbedBuilder()
+                        .setColor('#e74c3c')
+                        .setTitle('❌ Zakázka zrušena')
+                        .setDescription(`Vaše zakázka pro vlak **${zakazka.vlakCislo}** byla zrušena.`)
+                        .addFields(
+                            { name: '🗑️ Zrušil', value: interaction.user.tag },
+                            { name: '📅 Zrušeno', value: new Date().toLocaleString('cs-CZ') }
+                        )
+                        .setTimestamp();
+
+                    await zakazka.assignedUser.send({ embeds: [cancelDmEmbed] });
+                } catch (dmError) {
+                    console.log('Nepodařilo se poslat DM o zrušení:', dmError.message);
+                }
+            }
+
+            // Odstraň z aktivních zakázek
+            activeZakazky.delete(zakazkaId);
+
+            // Zavři kanál za 10 sekund
+            setTimeout(() => {
+                channel.delete().catch(console.error);
+            }, 10000);
+
+        } catch (error) {
+            console.error('Chyba při dokončování/rušení zakázky:', error);
+            await interaction.editReply({
+                content: '❌ Došlo k chybě při zpracování zakázky.'
             });
         }
     }
