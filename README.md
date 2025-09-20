@@ -28,9 +28,14 @@ npm install
 cp .env.example .env
 ```
 
-4. Vyplň Discord token do `.env` souboru:
+4. Vyplň konfiguraci do `.env` souboru:
 ```
+# Discord Bot Token
 DISCORD_TOKEN=tvůj_discord_token_zde
+
+# Google Sheets (volitelné pro automatický zápis jízd)
+GOOGLE_CREDENTIALS={"type":"service_account",...celý_json_obsah...}
+GOOGLE_SHEETS_ID=id_tvé_google_tabulky
 ```
 
 5. Spusti bota:

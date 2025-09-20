@@ -1,6 +1,8 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, SlashCommandBuilder, REST, Routes } = require('discord.js');
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 const axios = require('axios'); // Potřebujeme pro volání API
+const { google } = require('googleapis');
+require('dotenv').config();
 
 // ===== KONFIGURACE SYSTÉMU PŘIHLÁŠEK =====
 const CONFIG = {
@@ -10,6 +12,78 @@ const CONFIG = {
     CATEGORY_ID: '1418606519494246400', // Kategorie pro ticket kanály s přihláškami
     DISPATCHER_CHANNEL_ID: '1418624695829532764' // Kanál pro zprávy o jízdách (dispatcher)
 };
+
+// ===== GOOGLE SHEETS KONFIGURACE =====
+const SHEETS_CONFIG = {
+    SPREADSHEET_ID: process.env.GOOGLE_SHEETS_ID, // ID vaší tabulky
+    RANGE: 'Sheet1!A:H' // Rozsah pro zápis dat
+};
+
+// Autentifikace pro Google Sheets
+let sheetsAuth = null;
+let sheets = null;
+
+async function initializeGoogleSheets() {
+    try {
+        if (!process.env.GOOGLE_CREDENTIALS) {
+            console.log('⚠️ Google Sheets credentials nejsou nastavené');
+            return false;
+        }
+
+        const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+        
+        sheetsAuth = new google.auth.GoogleAuth({
+            credentials: credentials,
+            scopes: ['https://www.googleapis.com/auth/spreadsheets']
+        });
+
+        sheets = google.sheets({ version: 'v4', auth: sheetsAuth });
+        console.log('✅ Google Sheets připojeno úspěšně!');
+        return true;
+    } catch (error) {
+        console.error('❌ Chyba při připojování k Google Sheets:', error);
+        return false;
+    }
+}
+
+// Funkce pro zápis jízdy do Google Sheets
+async function zapisiJizduDoSheets(jizda, userName) {
+    try {
+        if (!sheets || !SHEETS_CONFIG.SPREADSHEET_ID) {
+            console.log('⚠️ Google Sheets není nakonfigurováno');
+            return false;
+        }
+
+        const datum = new Date().toLocaleDateString('cs-CZ');
+        const cas = new Date().toLocaleTimeString('cs-CZ');
+        
+        const radek = [
+            datum,                    // A - Datum
+            cas,                      // B - Čas
+            userName,                 // C - Uživatel
+            jizda.vlakCislo,         // D - Vlak
+            jizda.trasa,             // E - Trasa
+            jizda.doba + ' min',     // F - Doba trvání
+            jizda.body,              // G - Body
+            '' // H - Poznámky (prázdné)
+        ];
+
+        await sheets.spreadsheets.values.append({
+            spreadsheetId: SHEETS_CONFIG.SPREADSHEET_ID,
+            range: SHEETS_CONFIG.RANGE,
+            valueInputOption: 'RAW',
+            requestBody: {
+                values: [radek]
+            }
+        });
+
+        console.log(`✅ Jízda ${jizda.vlakCislo} zapsána do Google Sheets`);
+        return true;
+    } catch (error) {
+        console.error('❌ Chyba při zápisu do Google Sheets:', error);
+        return false;
+    }
+}
 
 // Úložiště pro aktivní přihlášky
 const activeApplications = new Map();
@@ -148,9 +222,12 @@ async function registerCommands() {
     }
 }
 
-client.on('ready', () => {
+client.on('ready', async () => {
     console.log(`Bot ${client.user.tag} je online!`);
     registerCommands(); // Registruj slash příkazy
+    
+    // Inicializuj Google Sheets
+    await initializeGoogleSheets();
 });
 
 client.on('messageCreate', async message => {
@@ -347,6 +424,9 @@ client.on('messageCreate', async message => {
         };
         
         dokonceneJizdy.get(message.author.id).push(dokoncenaJizda);
+
+        // Zapiš jízdu do Google Sheets
+        await zapisiJizduDoSheets(dokoncenaJizda, message.author.username);
 
         // Odstraň aktivní jízdu
         aktivniJizdy.delete(message.author.id);
