@@ -562,6 +562,11 @@ client.on('messageCreate', async message => {
                     name: '📊 Celkové statistiky', 
                     value: `**${sortedUsers.length}** aktivních strojvůdců\n**${sortedUsers.reduce((sum, [_, stats]) => sum + stats.celkoveJizdy, 0)}** dokončených jízd\n**${Math.round(sortedUsers.reduce((sum, [_, stats]) => sum + stats.celkovyCas, 0) / 60)}** hodin celkově`, 
                     inline: false 
+                },
+                {
+                    name: '📋 Kompletní historie jízd',
+                    value: `[📊 Zobrazit všechny jízdy v Google Sheets](https://docs.google.com/spreadsheets/d/${process.env.GOOGLE_SHEETS_ID}/edit)`,
+                    inline: false
                 }
             )
             .setFooter({ text: 'Žebříček se aktualizuje v reálném čase' })
