@@ -224,6 +224,7 @@ async function registerCommands() {
 
 client.on('ready', async () => {
     console.log(`Bot ${client.user.tag} je online!`);
+    console.log('🚀 Verze s Google Sheets debug - ' + new Date().toISOString());
     registerCommands(); // Registruj slash příkazy
     
     // Debug zpráva
