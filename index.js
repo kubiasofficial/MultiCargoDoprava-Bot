@@ -226,6 +226,11 @@ client.on('ready', async () => {
     console.log(`Bot ${client.user.tag} je online!`);
     registerCommands(); // Registruj slash příkazy
     
+    // Debug zpráva
+    console.log('🔍 Zkouším inicializovat Google Sheets...');
+    console.log('GOOGLE_CREDENTIALS existuje:', !!process.env.GOOGLE_CREDENTIALS);
+    console.log('GOOGLE_SHEETS_ID existuje:', !!process.env.GOOGLE_SHEETS_ID);
+    
     // Inicializuj Google Sheets
     await initializeGoogleSheets();
 });
