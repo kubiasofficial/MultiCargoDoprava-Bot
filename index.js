@@ -575,6 +575,30 @@ client.on('messageCreate', async message => {
         message.channel.send({ embeds: [embed] });
     }
 
+    // ===== PŘÍKAZ !HISTORY =====
+    if (message.content.startsWith('!history') || message.content.startsWith('!historie')) {
+        const historyEmbed = new EmbedBuilder()
+            .setColor('#4285f4')
+            .setTitle('📋 Historie všech jízd')
+            .setDescription('Historie všech jízd ve firmě je zde:\nhttps://docs.google.com/spreadsheets/d/1aBf1rn1OeQrwLhw8NJgkfrE_xViTLqp6AYw2-HyPIRA/edit?usp=sharing')
+            .addFields(
+                {
+                    name: '📊 Co najdete v tabulce:',
+                    value: '• Datum a čas každé jízdy\n• Jméno strojvůdce\n• Číslo vlaku a trasu\n• Dobu trvání jízdy\n• Získané body',
+                    inline: false
+                },
+                {
+                    name: '💡 Tip:',
+                    value: 'Tabulka se automaticky aktualizuje při každé dokončené jízdě!',
+                    inline: false
+                }
+            )
+            .setFooter({ text: 'MultiCargo Doprava • Tracking System' })
+            .setTimestamp();
+
+        message.channel.send({ embeds: [historyEmbed] });
+    }
+
     // ===== PŘÍKAZ !BODY =====
     if (message.content.startsWith('!body') || message.content.startsWith('!skore')) {
         const stats = getUserStats(message.author.id);
