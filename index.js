@@ -1869,4 +1869,104 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
+// ===== JEDNODUCHÝ !ODJEZDY3 (POUZE JSON API) =====
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    
+    if (message.content.startsWith('!odjezdy3')) {
+        const args = message.content.slice('!odjezdy3'.length).trim().split(' ');
+        const stationId = args[0];
+
+        if (!stationId) {
+            message.reply('❌ Zadejte ID stanice. Příklad: `!odjezdy3 422`');
+            return;
+        }
+
+        try {
+            // Načti JSON data
+            const response = await axios.get(`https://api1.aws.simrail.eu:8082/api/getEDRTimetables?serverCode=cz1`);
+            const trains = response.data;
+            
+            // Najdi odjezdy pro tuto stanici
+            let departures = [];
+            const currentTime = new Date();
+            
+            for (const train of trains) {
+                if (train.timetable && Array.isArray(train.timetable)) {
+                    for (const stop of train.timetable) {
+                        // Zkus všechny možné typy porovnání ID
+                        const matchesStation = stop.pointId === stationId || 
+                                             stop.pointId === parseInt(stationId) || 
+                                             stop.pointId.toString() === stationId;
+                        
+                        if (matchesStation && stop.departureTime) {
+                            const departureTime = new Date(stop.departureTime);
+                            
+                            // Přidej jen budoucí odjezdy
+                            if (departureTime > currentTime) {
+                                departures.push({
+                                    time: departureTime,
+                                    train: train.trainNoLocal || train.trainName || 'N/A',
+                                    destination: train.endStation || 'Neznámý cíl',
+                                    platform: stop.platform || stop.track || '',
+                                    stationName: stop.nameForPerson
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Seřaď a vezmi prvních 5
+            departures.sort((a, b) => a.time - b.time);
+            const first5 = departures.slice(0, 5);
+            
+            const embed = new EmbedBuilder()
+                .setColor('#00ff00')
+                .setTitle(`🚂 Odjezdy ze stanice ${stationId}`)
+                .setDescription(first5.length > 0 ? `Nalezeno ${departures.length} odjezdů` : 'Žádné budoucí odjezdy')
+                .setTimestamp();
+
+            if (first5.length > 0) {
+                const stationName = first5[0].stationName || 'Neznámá stanice';
+                embed.addFields({
+                    name: `🚄 ${stationName}`,
+                    value: first5.map(dep => {
+                        const timeStr = dep.time.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+                        const platform = dep.platform ? ` | 🛤️ ${dep.platform}` : '';
+                        return `🕐 **${timeStr}** | 🚂 ${dep.train} | 📍 → ${dep.destination}${platform}`;
+                    }).join('\n'),
+                    inline: false
+                });
+            } else {
+                // Ukáž dostupné stanice pro debug
+                const allStations = new Set();
+                trains.forEach(train => {
+                    if (train.timetable) {
+                        train.timetable.forEach(stop => {
+                            if (stop.departureTime) {
+                                allStations.add(`${stop.pointId}: ${stop.nameForPerson}`);
+                            }
+                        });
+                    }
+                });
+                
+                const sampleStations = Array.from(allStations).slice(0, 5);
+                embed.addFields({
+                    name: '❌ Stanice nenalezena',
+                    value: `ID "${stationId}" neexistuje.\n\n**Příklad aktivních stanic:**\n${sampleStations.map(s => `• ${s}`).join('\n')}`,
+                    inline: false
+                });
+            }
+            
+            embed.setFooter({ text: `MultiCargo Doprava • Celkem vlaků: ${trains.length}` });
+            message.channel.send({ embeds: [embed] });
+
+        } catch (error) {
+            console.error('!odjezdy3 error:', error);
+            message.reply(`❌ Chyba: ${error.message}`);
+        }
+    }
+});
+
 client.login(process.env.DISCORD_TOKEN);
