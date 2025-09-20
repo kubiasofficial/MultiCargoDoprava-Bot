@@ -13,8 +13,8 @@ const CONFIG = {
     DISPATCHER_CHANNEL_ID: '1418624695829532764', // Kanál pro zprávy o jízdách (dispatcher)
     
     // Role pozic (budete muset přidat skutečné ID rolí)
-    STROJVUDCE_ROLE_ID: 'ID_ROLE_STROJVUDCE', // 🚂 Strojvůdce
-    VYPRAVCI_ROLE_ID: 'ID_ROLE_VYPRAVCI' // 🚉 Výpravčí
+    STROJVUDCE_ROLE_ID: '1418875308811223123', // 🚂 Strojvůdce
+    VYPRAVCI_ROLE_ID: '1418875376855158825' // 🚉 Výpravčí
 };
 
 // ===== GOOGLE SHEETS KONFIGURACE =====
