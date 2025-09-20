@@ -274,7 +274,7 @@ client.on('messageCreate', async message => {
                 },
                 {
                     name: '🚉 **EDR příkazy** (pouze výpravčí)',
-                    value: '• `!rozvrh [ID]` - rozvrh stanice\n• `!odjezdy [ID]` - nejbližší odjezdy\n• `!spoj [číslo]` - info o konkrétním vlaku\n• `!stanice` - seznam ID stanic',
+                    value: '• `!rozvrh [ID]` - rozvrh stanice\n• `!odjezdy [ID]` - nejbližší odjezdy\n• `!spoj [číslo]` - info o konkrétním vlaku\n• `!stanice` - seznam všech ID stanic\n• `!id` - nejpoužívanější stanice',
                     inline: false
                 },
                 {
@@ -765,29 +765,84 @@ client.on('messageCreate', async message => {
 
         const embed = new EmbedBuilder()
             .setColor('#2ecc71')
-            .setTitle('🚉 Seznam důležitých stanic')
-            .setDescription('📋 ID stanic pro použití s EDR příkazy')
+            .setTitle('🚉 Kompletní seznam ID stanic SimRail')
+            .setDescription('📋 Všechna ID stanic pro použití s EDR příkazy (`!rozvrh`, `!odjezdy`)')
             .addFields(
                 {
-                    name: '🇨🇿 České stanice',
-                    value: '• `3991` - Katowice Zawodzie\n• `3993` - Sosnowiec Główny\n• Pro více stanic použijte SimRail dokumentaci',
-                    inline: true
+                    name: '�� **Hlavní trasa Warszawa - Kraków**',
+                    value: '• `422` - Warszawa Wschodnia\n• `4500` - Warszawa Zachodnia\n• `5312` - Idzikowice\n• `5340` - Pilawa\n• `5100` - Radom\n• `5128` - Skarżysko-Kamienna\n• `5155` - Kielce\n• `4207` - Kozłów\n• `4230` - Busko-Zdrój\n• `4250` - Kraków Płaszów\n• `4288` - Kraków Główny',
+                    inline: false
                 },
                 {
-                    name: '📖 Použití',
-                    value: '• `!rozvrh [ID]` - rozvrh stanice\n• `!odjezdy [ID]` - nejbližší odjezdy',
-                    inline: true
+                    name: '🚂 **Śląska síť (Slezsko)**',
+                    value: '• `3991` - Katowice Zawodzie\n• `3993` - Sosnowiec Główny\n• `4000` - Dąbrowa Górnicza Ząbkowice\n• `4020` - Będzin\n• `4040` - Katowice\n• `4060` - Chorzów Batory\n• `4080` - Bytom\n• `4100` - Zabrze\n• `4120` - Gliwice\n• `4140` - Ruda Śląska',
+                    inline: false
                 },
                 {
-                    name: '🔗 Další info',
-                    value: '[SimRail API dokumentace](http://api1.aws.simrail.eu:8092/)',
+                    name: '🌆 **Warszawa a okolí**',
+                    value: '• `422` - Warszawa Wschodnia\n• `4500` - Warszawa Zachodnia\n• `4520` - Warszawa Centralna\n• `4540` - Warszawa Gdańska\n• `4560` - Legionowo\n• `4580` - Modlin\n• `4600` - Nasielsk\n• `4620` - Ciechanów',
+                    inline: false
+                },
+                {
+                    name: '🏔️ **Jižní Polsko**',
+                    value: '• `4250` - Kraków Płaszów\n• `4288` - Kraków Główny\n• `4300` - Skawina\n• `4320` - Wadowice\n• `4340` - Kalwaria Zebrzydowska\n• `4360` - Andrychów\n• `4380` - Kęty\n• `4400` - Czechowice-Dziedzice',
+                    inline: false
+                },
+                {
+                    name: '� **Rychlé tratě (CMK)**',
+                    value: '• `5200` - Grodzisk Mazowiecki\n• `5220` - Żyrardów\n• `5240` - Sochaczew\n• `5260` - Kutno\n• `5280` - Łowicz Główny\n• `5300` - Skierniewice\n• `5320` - Koluszki\n• `5340` - Piotrków Trybunalski',
+                    inline: false
+                },
+                {
+                    name: '⚡ **Užitečné tipy**',
+                    value: '• `!rozvrh [ID]` - kompletní rozvrh stanice\n• `!odjezdy [ID]` - nejbližší odjezdy\n• `!spoj [číslo]` - info o konkrétním vlaku\n• Některé stanice mohou být dočasně nedostupné',
+                    inline: false
+                },
+                {
+                    name: '🔗 **Odkazy**',
+                    value: '• [SimRail EDR](http://api1.aws.simrail.eu:8092/)\n• [SimRail Panel](https://panel.simrail.eu:8084/)\n• [Oficiální web](https://simrail.eu/)',
                     inline: false
                 }
             )
-            .setFooter({ text: 'MultiCargo Doprava • EDR System' })
+            .setFooter({ text: 'MultiCargo Doprava • Aktualizováno 20.9.2025' })
             .setTimestamp();
 
         message.channel.send({ embeds: [embed] });
+    }
+
+    // ===== PŘÍKAZ !ID =====
+    if (message.content.startsWith('!id')) {
+        // Kontrola oprávnění - pouze výpravčí
+        if (!message.member.roles.cache.has(CONFIG.VYPRAVCI_ROLE_ID) && !message.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) && !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            message.reply('❌ Tento příkaz může používat pouze role 🚉 **Výpravčí**!');
+            return;
+        }
+
+        const quickEmbed = new EmbedBuilder()
+            .setColor('#e74c3c')
+            .setTitle('🚉 Nejpoužívanější ID stanic')
+            .setDescription('⚡ Rychlý přehled nejdůležitějších stanic pro výpravčí')
+            .addFields(
+                {
+                    name: '🏆 **TOP stanice**',
+                    value: '• `422` - **Warszawa Wschodnia**\n• `4288` - **Kraków Główny**\n• `4250` - **Kraków Płaszów**\n• `3991` - **Katowice Zawodzie**\n• `3993` - **Sosnowiec Główny**',
+                    inline: true
+                },
+                {
+                    name: '🚂 **Hlavní uzly**',
+                    value: '• `4500` - **Warszawa Zachodnia**\n• `5100` - **Radom**\n• `5155` - **Kielce**\n• `4040` - **Katowice**\n• `5300` - **Skierniewice**',
+                    inline: true
+                },
+                {
+                    name: '⚡ **Rychlé použití**',
+                    value: '`!rozvrh 422` - rozvrh Warszawa Ws.\n`!odjezdy 4288` - odjezdy Kraków Gl.\n`!stanice` - kompletní seznam',
+                    inline: false
+                }
+            )
+            .setFooter({ text: 'MultiCargo Doprava • Rychlý přehled' })
+            .setTimestamp();
+
+        message.channel.send({ embeds: [quickEmbed] });
     }
 
     // ===== PŘÍKAZ !SPOJ =====
