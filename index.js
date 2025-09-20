@@ -16,7 +16,7 @@ const CONFIG = {
 // ===== GOOGLE SHEETS KONFIGURACE =====
 const SHEETS_CONFIG = {
     SPREADSHEET_ID: process.env.GOOGLE_SHEETS_ID, // ID vaší tabulky
-    RANGE: 'Sheet1!A:H' // Rozsah pro zápis dat
+    RANGE: 'List 1!A:H' // Rozsah pro zápis dat
 };
 
 // Autentifikace pro Google Sheets
