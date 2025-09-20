@@ -732,6 +732,38 @@ client.on('messageCreate', async message => {
             // Debug - log částečný obsah pro diagnostiku
             console.log(`🔍 EDR API Response pro stanici ${stationId}:`, htmlContent.substring(0, 500));
             
+            // Kontrola, zda EDR API vůbec funguje
+            if (htmlContent.includes('No stations found') || htmlContent.includes('An error has occurred')) {
+                console.log(`❌ EDR API nefunguje - vrací chybovou stránku`);
+                
+                const embed = new EmbedBuilder()
+                    .setColor('#e67e22')
+                    .setTitle(`⚠️ EDR API momentálně nedostupné`)
+                    .setDescription(`Stanice **${stationId}** - SimRail EDR systém je dočasně nedostupný`)
+                    .addFields(
+                        {
+                            name: '🔧 Současný stav',
+                            value: 'EDR API server vrací chybovou stránku nebo se restartuje',
+                            inline: false
+                        },
+                        {
+                            name: '💡 Alternativní řešení',
+                            value: '• Zkuste za chvíli znovu\n• Použijte `!rozvrh [ID]` pro přímý odkaz\n• Sledujte vlaky pomocí `!jizda [číslo]`',
+                            inline: false
+                        },
+                        {
+                            name: '🚉 Testované stanice',
+                            value: '• `422` - Warszawa Wschodnia\n• `4288` - Kraków Główny\n• `3991` - Katowice Zawodzie',
+                            inline: false
+                        }
+                    )
+                    .setFooter({ text: 'MultiCargo Doprava • EDR API Status Check' })
+                    .setTimestamp();
+
+                message.channel.send({ embeds: [embed] });
+                return;
+            }
+            
             // Vylepšené parsování HTML pro odjezdy s více vzory
             let odjezdyMatch = htmlContent.match(/<h3[^>]*>.*?Odjezdy.*?<\/h3>(.*?)<h3/is) ||
                               htmlContent.match(/<h3[^>]*>.*?Departures.*?<\/h3>(.*?)<h3/is) ||
@@ -863,6 +895,38 @@ client.on('messageCreate', async message => {
             
             // Debug - log částečný obsah pro diagnostiku
             console.log(`🔍 EDR API Response pro příjezdy stanice ${stationId}:`, htmlContent.substring(0, 500));
+            
+            // Kontrola, zda EDR API vůbec funguje
+            if (htmlContent.includes('No stations found') || htmlContent.includes('An error has occurred')) {
+                console.log(`❌ EDR API nefunguje - vrací chybovou stránku`);
+                
+                const embed = new EmbedBuilder()
+                    .setColor('#e67e22')
+                    .setTitle(`⚠️ EDR API momentálně nedostupné`)
+                    .setDescription(`Stanice **${stationId}** - SimRail EDR systém je dočasně nedostupný`)
+                    .addFields(
+                        {
+                            name: '🔧 Současný stav',
+                            value: 'EDR API server vrací chybovou stránku nebo se restartuje',
+                            inline: false
+                        },
+                        {
+                            name: '💡 Alternativní řešení',
+                            value: '• Zkuste za chvíli znovu\n• Použijte `!rozvrh [ID]` pro přímý odkaz\n• Sledujte vlaky pomocí `!jizda [číslo]`',
+                            inline: false
+                        },
+                        {
+                            name: '🚄 Testované stanice',
+                            value: '• `422` - Warszawa Wschodnia\n• `4288` - Kraków Główny\n• `3991` - Katowice Zawodzie',
+                            inline: false
+                        }
+                    )
+                    .setFooter({ text: 'MultiCargo Doprava • EDR API Status Check' })
+                    .setTimestamp();
+
+                message.channel.send({ embeds: [embed] });
+                return;
+            }
             
             // Vylepšené parsování HTML pro příjezdy s více vzory
             let prijezdyMatch = htmlContent.match(/<h3[^>]*>.*?Příjezdy.*?<\/h3>(.*?)<h3/is) ||
