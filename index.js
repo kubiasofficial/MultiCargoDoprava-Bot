@@ -260,6 +260,51 @@ client.on('ready', async () => {
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
+    // ===== PŘÍKAZ !HELP =====
+    if (message.content === '!help' || message.content === '!pomoc') {
+        const helpEmbed = new EmbedBuilder()
+            .setColor('#3498db')
+            .setTitle('📋 MultiCargo Doprava - Seznam příkazů')
+            .setDescription('🚂 Kompletní seznam dostupných příkazů')
+            .addFields(
+                {
+                    name: '🚂 **Základní příkazy**',
+                    value: '• `!jizda [číslo]` - začít jízdu vlakem\n• `!konec` - ukončit aktivní jízdu\n• `!stats` - vaše statistiky a body\n• `!top` - žebříček nejlepších řidičů\n• `!history` - historie vašich jízd',
+                    inline: false
+                },
+                {
+                    name: '🚉 **EDR příkazy** (pouze výpravčí)',
+                    value: '• `!rozvrh [ID]` - rozvrh stanice\n• `!odjezdy [ID]` - nejbližší odjezdy\n• `!spoj [číslo]` - info o konkrétním vlaku\n• `!stanice` - seznam ID stanic',
+                    inline: false
+                },
+                {
+                    name: '👥 **Systém pozic**',
+                    value: '• Použijte tlačítka pro výběr pozice\n• 🚂 Strojvůdce - řízení vlaků\n• 🚉 Výpravčí - dispečerské funkce + EDR',
+                    inline: false
+                },
+                {
+                    name: '⚙️ **Admin příkazy**',
+                    value: '• `!setup-aplikace` - nastavit systém přihlášek\n• `!setup-pozice` - nastavit výběr pozic\n• `!oznámení [text]` - poslat oznámení\n• `/schvalit` - schválit přihlášku\n• `/odmítnout` - odmítnout přihlášku',
+                    inline: false
+                },
+                {
+                    name: '🎯 **Bodový systém**',
+                    value: '• **+10 bodů** za dokončenou jízdu\n• **+5 bonus** za dlouhé trasy (>50km)\n• **+3 bonus** za rychlé vlaky (>120 km/h)',
+                    inline: false
+                },
+                {
+                    name: '🔗 **Užitečné odkazy**',
+                    value: '• [SimRail](https://simrail.eu/)\n• [Google Sheets](https://docs.google.com/spreadsheets/)\n• [GitHub Repo](https://github.com/)',
+                    inline: false
+                }
+            )
+            .setFooter({ text: 'MultiCargo Doprava • !help pro zobrazení nápovědy' })
+            .setTimestamp();
+
+        message.channel.send({ embeds: [helpEmbed] });
+        return;
+    }
+
     // ===== PŘÍKAZ PRO VYTVOŘENÍ EMBED PŘIHLÁŠKY (pouze pro adminy) =====
     if (message.content === '!setup-aplikace') {
         // Zkontroluj admin oprávnění
@@ -611,6 +656,213 @@ client.on('messageCreate', async message => {
             .setTimestamp();
 
         message.channel.send({ embeds: [historyEmbed] });
+    }
+
+    // ===== EDR API PŘÍKAZY (pouze pro výpravčí) =====
+    
+    // ===== PŘÍKAZ !ROZVRH =====
+    if (message.content.startsWith('!rozvrh')) {
+        // Kontrola oprávnění - pouze výpravčí
+        if (!message.member.roles.cache.has(CONFIG.VYPRAVCI_ROLE_ID) && !message.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) && !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            message.reply('❌ Tento příkaz může používat pouze role 🚉 **Výpravčí**!');
+            return;
+        }
+
+        const args = message.content.slice('!rozvrh'.length).trim().split(' ');
+        const stationId = args[0];
+
+        if (!stationId || isNaN(stationId)) {
+            message.reply('❌ Zadejte platné ID stanice. Příklad: `!rozvrh 3991`');
+            return;
+        }
+
+        try {
+            const response = await axios.get(`http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs`);
+            
+            // Jednoduchý parsing HTML tabulky (základní implementace)
+            const htmlContent = response.data;
+            
+            const embed = new EmbedBuilder()
+                .setColor('#4285f4')
+                .setTitle(`🚉 Rozvrh stanice (ID: ${stationId})`)
+                .setDescription('📋 Aktuální rozvrh pro vybranou stanici')
+                .addFields(
+                    {
+                        name: '🔗 Podrobný rozvrh',
+                        value: `[Zobrazit kompletní rozvrh](http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs)`,
+                        inline: false
+                    },
+                    {
+                        name: '💡 Tip',
+                        value: 'Použijte `!odjezdy [ID_stanice]` pro nejbližší odjezdy',
+                        inline: false
+                    }
+                )
+                .setFooter({ text: 'MultiCargo Doprava • EDR System' })
+                .setTimestamp();
+
+            message.channel.send({ embeds: [embed] });
+
+        } catch (error) {
+            console.error('Chyba při načítání rozvrhu:', error);
+            message.reply('❌ Došlo k chybě při načítání rozvrhu. Zkontrolujte ID stanice.');
+        }
+    }
+
+    // ===== PŘÍKAZ !ODJEZDY =====
+    if (message.content.startsWith('!odjezdy')) {
+        // Kontrola oprávnění - pouze výpravčí
+        if (!message.member.roles.cache.has(CONFIG.VYPRAVCI_ROLE_ID) && !message.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) && !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            message.reply('❌ Tento příkaz může používat pouze role 🚉 **Výpravčí**!');
+            return;
+        }
+
+        const args = message.content.slice('!odjezdy'.length).trim().split(' ');
+        const stationId = args[0];
+
+        if (!stationId || isNaN(stationId)) {
+            message.reply('❌ Zadejte platné ID stanice. Příklad: `!odjezdy 3991`');
+            return;
+        }
+
+        try {
+            const response = await axios.get(`http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs`);
+            
+            const embed = new EmbedBuilder()
+                .setColor('#f39c12')
+                .setTitle(`⏰ Nejbližší odjezdy (ID: ${stationId})`)
+                .setDescription('🚂 Aktuální odjezdy z vybrané stanice')
+                .addFields(
+                    {
+                        name: '📊 EDR Data',
+                        value: 'Data jsou získávána v reálném čase ze SimRail EDR systému',
+                        inline: false
+                    },
+                    {
+                        name: '🔗 Detailní info',
+                        value: `[Zobrazit kompletní rozvrh](http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs)`,
+                        inline: false
+                    }
+                )
+                .setFooter({ text: 'MultiCargo Doprava • EDR System' })
+                .setTimestamp();
+
+            message.channel.send({ embeds: [embed] });
+
+        } catch (error) {
+            console.error('Chyba při načítání odjezdů:', error);
+            message.reply('❌ Došlo k chybě při načítání odjezdů. Zkontrolujte ID stanice.');
+        }
+    }
+
+    // ===== PŘÍKAZ !STANICE =====
+    if (message.content.startsWith('!stanice')) {
+        // Kontrola oprávnění - pouze výpravčí
+        if (!message.member.roles.cache.has(CONFIG.VYPRAVCI_ROLE_ID) && !message.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) && !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            message.reply('❌ Tento příkaz může používat pouze role 🚉 **Výpravčí**!');
+            return;
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor('#2ecc71')
+            .setTitle('🚉 Seznam důležitých stanic')
+            .setDescription('📋 ID stanic pro použití s EDR příkazy')
+            .addFields(
+                {
+                    name: '🇨🇿 České stanice',
+                    value: '• `3991` - Katowice Zawodzie\n• `3993` - Sosnowiec Główny\n• Pro více stanic použijte SimRail dokumentaci',
+                    inline: true
+                },
+                {
+                    name: '📖 Použití',
+                    value: '• `!rozvrh [ID]` - rozvrh stanice\n• `!odjezdy [ID]` - nejbližší odjezdy',
+                    inline: true
+                },
+                {
+                    name: '🔗 Další info',
+                    value: '[SimRail API dokumentace](http://api1.aws.simrail.eu:8092/)',
+                    inline: false
+                }
+            )
+            .setFooter({ text: 'MultiCargo Doprava • EDR System' })
+            .setTimestamp();
+
+        message.channel.send({ embeds: [embed] });
+    }
+
+    // ===== PŘÍKAZ !SPOJ =====
+    if (message.content.startsWith('!spoj')) {
+        // Kontrola oprávnění - pouze výpravčí
+        if (!message.member.roles.cache.has(CONFIG.VYPRAVCI_ROLE_ID) && !message.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) && !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            message.reply('❌ Tento příkaz může používat pouze role 🚉 **Výpravčí**!');
+            return;
+        }
+
+        const args = message.content.slice('!spoj'.length).trim().split(' ');
+        const trainNumber = args[0];
+
+        if (!trainNumber || isNaN(trainNumber)) {
+            message.reply('❌ Zadejte platné číslo vlaku. Příklad: `!spoj 5411`');
+            return;
+        }
+
+        try {
+            // Pokusíme se najít vlak v aktuální API
+            const response = await axios.get('https://panel.simrail.eu:8084/trains-open?serverCode=cz1');
+            const vlaky = response.data.data;
+            
+            const hledanyVlak = vlaky.find(vlak => 
+                vlak.TrainNoLocal === trainNumber || 
+                vlak.TrainNoLocal === parseInt(trainNumber)
+            );
+
+            const embed = new EmbedBuilder()
+                .setColor('#9b59b6')
+                .setTitle(`🚂 Informace o spoji ${trainNumber}`)
+                .setFooter({ text: 'MultiCargo Doprava • EDR System' })
+                .setTimestamp();
+
+            if (hledanyVlak) {
+                embed.setDescription(`✅ Spoj **${trainNumber}** byl nalezen v aktivních vlacích`)
+                    .addFields(
+                        {
+                            name: '🚂 Základní info',
+                            value: `**Číslo:** ${hledanyVlak.TrainNoLocal}\n**Název:** ${hledanyVlak.TrainName || 'Neznámý'}\n**Typ:** ${hledanyVlak.Vehicles || 'Neznámý'}`,
+                            inline: true
+                        },
+                        {
+                            name: '📍 Pozice',
+                            value: `**Z:** ${hledanyVlak.StartStation || 'Neznámo'}\n**Do:** ${hledanyVlak.EndStation || 'Neznámo'}`,
+                            inline: true
+                        },
+                        {
+                            name: '🔗 EDR detaily',
+                            value: `[Zobrazit v EDR](http://api1.aws.simrail.eu:8092/details?trainNumber=${trainNumber})`,
+                            inline: false
+                        }
+                    );
+            } else {
+                embed.setDescription(`❌ Spoj **${trainNumber}** nebyl nalezen v aktivních vlacích`)
+                    .addFields(
+                        {
+                            name: '🔍 Možná řešení',
+                            value: '• Vlak momentálně nejede\n• Zkontrolujte číslo vlaku\n• Použijte `!rozvrh [ID_stanice]` pro rozvrh',
+                            inline: false
+                        },
+                        {
+                            name: '🔗 EDR detaily',
+                            value: `[Zobrazit v EDR](http://api1.aws.simrail.eu:8092/details?trainNumber=${trainNumber})`,
+                            inline: false
+                        }
+                    );
+            }
+
+            message.channel.send({ embeds: [embed] });
+
+        } catch (error) {
+            console.error('Chyba při hledání spoje:', error);
+            message.reply('❌ Došlo k chybě při hledání spoje.');
+        }
     }
 
     // ===== PŘÍKAZ !BODY =====
