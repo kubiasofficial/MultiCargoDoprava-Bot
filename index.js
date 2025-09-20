@@ -729,26 +729,77 @@ client.on('messageCreate', async message => {
             const response = await axios.get(`http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs`);
             const htmlContent = response.data;
             
-            // Parsování HTML pro odjezdy (hledáme tabulku s odjezdy)
-            const odjezdyMatch = htmlContent.match(/<h3[^>]*>.*?Odjezdy.*?<\/h3>(.*?)<h3|<h3[^>]*>.*?Departures.*?<\/h3>(.*?)<h3/is);
+            // Debug - log částečný obsah pro diagnostiku
+            console.log(`🔍 EDR API Response pro stanici ${stationId}:`, htmlContent.substring(0, 500));
+            
+            // Vylepšené parsování HTML pro odjezdy s více vzory
+            let odjezdyMatch = htmlContent.match(/<h3[^>]*>.*?Odjezdy.*?<\/h3>(.*?)<h3/is) ||
+                              htmlContent.match(/<h3[^>]*>.*?Departures.*?<\/h3>(.*?)<h3/is) ||
+                              htmlContent.match(/<h2[^>]*>.*?Odjezdy.*?<\/h2>(.*?)<h2/is) ||
+                              htmlContent.match(/<h2[^>]*>.*?Departures.*?<\/h2>(.*?)<h2/is) ||
+                              htmlContent.match(/Odjezdy[^<]*<\/[^>]*>(.*?)<(?:h[123]|div)/is) ||
+                              htmlContent.match(/Departures[^<]*<\/[^>]*>(.*?)<(?:h[123]|div)/is);
+            
             let odjezdyData = [];
             
             if (odjezdyMatch) {
-                const tableContent = odjezdyMatch[1] || odjezdyMatch[2];
-                // Parsování řádků tabulky
+                const tableContent = odjezdyMatch[1];
+                console.log(`📊 Nalezená tabulka odjezdů pro ${stationId}:`, tableContent.substring(0, 300));
+                
+                // Vylepšené parsování řádků tabulky
                 const rows = tableContent.match(/<tr[^>]*>(.*?)<\/tr>/gis);
                 
-                if (rows) {
+                if (rows && rows.length > 1) {
+                    console.log(`📋 Počet řádků v tabulce: ${rows.length}`);
+                    
                     for (let i = 1; i < Math.min(6, rows.length); i++) { // První 5 odjezdů (přeskočit header)
                         const cells = rows[i].match(/<td[^>]*>(.*?)<\/td>/gis);
-                        if (cells && cells.length >= 4) {
-                            const cas = cells[0].replace(/<[^>]*>/g, '').trim();
-                            const vlak = cells[1].replace(/<[^>]*>/g, '').trim();
-                            const smer = cells[2].replace(/<[^>]*>/g, '').trim();
-                            const kolej = cells[3].replace(/<[^>]*>/g, '').trim();
+                        
+                        if (cells && cells.length >= 3) {
+                            let cas = cells[0] ? cells[0].replace(/<[^>]*>/g, '').trim() : '';
+                            let vlak = cells[1] ? cells[1].replace(/<[^>]*>/g, '').trim() : '';
+                            let smer = cells[2] ? cells[2].replace(/<[^>]*>/g, '').trim() : '';
+                            let kolej = cells[3] ? cells[3].replace(/<[^>]*>/g, '').trim() : '';
                             
-                            if (cas && vlak) {
+                            // Základní validace dat
+                            if (cas && cas.match(/\d{1,2}:\d{2}/) && vlak) {
                                 odjezdyData.push(`🕐 **${cas}** | 🚂 ${vlak} | 📍 ${smer}${kolej ? ` | 🛤️ ${kolej}` : ''}`);
+                                console.log(`✅ Přidán odjezd: ${cas} | ${vlak} | ${smer}`);
+                            } else {
+                                console.log(`❌ Nevalidní data: cas="${cas}", vlak="${vlak}", smer="${smer}"`);
+                            }
+                        }
+                    }
+                } else {
+                    console.log(`❌ Žádné řádky tabulky nalezeny pro stanici ${stationId}`);
+                }
+            } else {
+                console.log(`❌ Sekce odjezdů nenalezena pro stanici ${stationId}`);
+                
+                // Zkusíme alternativní approach - hledání tabulek obecně
+                const anyTable = htmlContent.match(/<table[^>]*>(.*?)<\/table>/gis);
+                if (anyTable) {
+                    console.log(`📋 Nalezeno ${anyTable.length} tabulek na stránce`);
+                    // Pokusíme se najít tabulku s časovými údaji
+                    for (let table of anyTable) {
+                        if (table.match(/\d{1,2}:\d{2}/)) {
+                            console.log(`⏰ Nalezena tabulka s časy:`, table.substring(0, 200));
+                            // Zkusíme parsovat tuto tabulku
+                            const tableRows = table.match(/<tr[^>]*>(.*?)<\/tr>/gis);
+                            if (tableRows && tableRows.length > 1) {
+                                for (let i = 1; i < Math.min(4, tableRows.length); i++) {
+                                    const cells = tableRows[i].match(/<td[^>]*>(.*?)<\/td>/gis);
+                                    if (cells && cells.length >= 2) {
+                                        let cas = cells[0] ? cells[0].replace(/<[^>]*>/g, '').trim() : '';
+                                        let vlak = cells[1] ? cells[1].replace(/<[^>]*>/g, '').trim() : '';
+                                        
+                                        if (cas && cas.match(/\d{1,2}:\d{2}/) && vlak) {
+                                            odjezdyData.push(`🕐 **${cas}** | 🚂 ${vlak} | 📍 Ze stanice`);
+                                            console.log(`✅ Alternativní parsing: ${cas} | ${vlak}`);
+                                        }
+                                    }
+                                }
+                                break;
                             }
                         }
                     }
@@ -771,7 +822,7 @@ client.on('messageCreate', async message => {
             } else {
                 embed.addFields({
                     name: '❌ Žádné odjezdy',
-                    value: 'V tuto chvíli nejsou plánovány žádné odjezdy nebo došlo k chybě při parsování dat.',
+                    value: `Stanice ${stationId} momentálně nemá naplánované odjezdy nebo používá jiný formát dat.\n\n💡 **Tip:** Zkuste jinou aktivní stanici:\n• \`!odjezdy 422\` - Warszawa Wschodnia\n• \`!odjezdy 4288\` - Kraków Główny`,
                     inline: false
                 });
             }
@@ -810,26 +861,73 @@ client.on('messageCreate', async message => {
             const response = await axios.get(`http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs`);
             const htmlContent = response.data;
             
-            // Parsování HTML pro příjezdy
-            const prijezdyMatch = htmlContent.match(/<h3[^>]*>.*?Příjezdy.*?<\/h3>(.*?)<h3|<h3[^>]*>.*?Arrivals.*?<\/h3>(.*?)<h3/is);
+            // Debug - log částečný obsah pro diagnostiku
+            console.log(`🔍 EDR API Response pro příjezdy stanice ${stationId}:`, htmlContent.substring(0, 500));
+            
+            // Vylepšené parsování HTML pro příjezdy s více vzory
+            let prijezdyMatch = htmlContent.match(/<h3[^>]*>.*?Příjezdy.*?<\/h3>(.*?)<h3/is) ||
+                               htmlContent.match(/<h3[^>]*>.*?Arrivals.*?<\/h3>(.*?)<h3/is) ||
+                               htmlContent.match(/<h2[^>]*>.*?Příjezdy.*?<\/h2>(.*?)<h2/is) ||
+                               htmlContent.match(/<h2[^>]*>.*?Arrivals.*?<\/h2>(.*?)<h2/is) ||
+                               htmlContent.match(/Příjezdy[^<]*<\/[^>]*>(.*?)<(?:h[123]|div)/is) ||
+                               htmlContent.match(/Arrivals[^<]*<\/[^>]*>(.*?)<(?:h[123]|div)/is);
+            
             let prijezdyData = [];
             
             if (prijezdyMatch) {
-                const tableContent = prijezdyMatch[1] || prijezdyMatch[2];
-                // Parsování řádků tabulky
+                const tableContent = prijezdyMatch[1];
+                console.log(`📊 Nalezená tabulka příjezdů pro ${stationId}:`, tableContent.substring(0, 300));
+                
+                // Vylepšené parsování řádků tabulky
                 const rows = tableContent.match(/<tr[^>]*>(.*?)<\/tr>/gis);
                 
-                if (rows) {
+                if (rows && rows.length > 1) {
+                    console.log(`📋 Počet řádků v tabulce příjezdů: ${rows.length}`);
+                    
                     for (let i = 1; i < Math.min(6, rows.length); i++) { // První 5 příjezdů (přeskočit header)
                         const cells = rows[i].match(/<td[^>]*>(.*?)<\/td>/gis);
-                        if (cells && cells.length >= 4) {
-                            const cas = cells[0].replace(/<[^>]*>/g, '').trim();
-                            const vlak = cells[1].replace(/<[^>]*>/g, '').trim();
-                            const odkud = cells[2].replace(/<[^>]*>/g, '').trim();
-                            const kolej = cells[3].replace(/<[^>]*>/g, '').trim();
+                        
+                        if (cells && cells.length >= 3) {
+                            let cas = cells[0] ? cells[0].replace(/<[^>]*>/g, '').trim() : '';
+                            let vlak = cells[1] ? cells[1].replace(/<[^>]*>/g, '').trim() : '';
+                            let odkud = cells[2] ? cells[2].replace(/<[^>]*>/g, '').trim() : '';
+                            let kolej = cells[3] ? cells[3].replace(/<[^>]*>/g, '').trim() : '';
                             
-                            if (cas && vlak) {
+                            // Základní validace dat
+                            if (cas && cas.match(/\d{1,2}:\d{2}/) && vlak) {
                                 prijezdyData.push(`🕐 **${cas}** | 🚂 ${vlak} | 📍 ${odkud}${kolej ? ` | 🛤️ ${kolej}` : ''}`);
+                                console.log(`✅ Přidán příjezd: ${cas} | ${vlak} | ${odkud}`);
+                            } else {
+                                console.log(`❌ Nevalidní data příjezdu: cas="${cas}", vlak="${vlak}", odkud="${odkud}"`);
+                            }
+                        }
+                    }
+                } else {
+                    console.log(`❌ Žádné řádky tabulky příjezdů nalezeny pro stanici ${stationId}`);
+                }
+            } else {
+                console.log(`❌ Sekce příjezdů nenalezena pro stanici ${stationId}`);
+                
+                // Zkusíme alternativní approach pro příjezdy
+                const anyTable = htmlContent.match(/<table[^>]*>(.*?)<\/table>/gis);
+                if (anyTable && anyTable.length > 1) {
+                    // Pokud jsou 2+ tabulky, druhá může být příjezdy
+                    const secondTable = anyTable[1];
+                    if (secondTable.match(/\d{1,2}:\d{2}/)) {
+                        console.log(`⏰ Nalezena druhá tabulka s časy (možné příjezdy):`, secondTable.substring(0, 200));
+                        const tableRows = secondTable.match(/<tr[^>]*>(.*?)<\/tr>/gis);
+                        if (tableRows && tableRows.length > 1) {
+                            for (let i = 1; i < Math.min(4, tableRows.length); i++) {
+                                const cells = tableRows[i].match(/<td[^>]*>(.*?)<\/td>/gis);
+                                if (cells && cells.length >= 2) {
+                                    let cas = cells[0] ? cells[0].replace(/<[^>]*>/g, '').trim() : '';
+                                    let vlak = cells[1] ? cells[1].replace(/<[^>]*>/g, '').trim() : '';
+                                    
+                                    if (cas && cas.match(/\d{1,2}:\d{2}/) && vlak) {
+                                        prijezdyData.push(`🕐 **${cas}** | 🚂 ${vlak} | 📍 Do stanice`);
+                                        console.log(`✅ Alternativní parsing příjezdu: ${cas} | ${vlak}`);
+                                    }
+                                }
                             }
                         }
                     }
@@ -840,7 +938,7 @@ client.on('messageCreate', async message => {
                 .setColor('#e74c3c')
                 .setTitle(`🚄 Nejbližších 5 příjezdů (ID: ${stationId})`)
                 .setDescription('🚂 Aktuální příjezdy do vybrané stanice')
-                .setFooter({ text: 'MultiCargo Doprava • EDR System' })
+                .setFooter({ text: 'MultiCargo Doprava • EDR System • CZ-1 Server' })
                 .setTimestamp();
 
             if (prijezdyData.length > 0) {
@@ -852,7 +950,7 @@ client.on('messageCreate', async message => {
             } else {
                 embed.addFields({
                     name: '❌ Žádné příjezdy',
-                    value: 'V tuto chvíli nejsou plánovány žádné příjezdy nebo došlo k chybě při parsování dat.',
+                    value: `Stanice ${stationId} momentálně nemá naplánované příjezdy nebo používá jiný formát dat.\n\n💡 **Tip:** Zkuste jinou aktivní stanici:\n• \`!prijezdy 422\` - Warszawa Wschodnia\n• \`!prijezdy 3991\` - Katowice Zawodzie`,
                     inline: false
                 });
             }
