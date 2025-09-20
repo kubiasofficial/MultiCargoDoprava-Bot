@@ -918,12 +918,6 @@ client.on('messageCreate', async message => {
 
     // ===== TESTOVACÍ PŘÍKAZ !ODJEZDY2 (JSON API) =====
     if (message.content.startsWith('!odjezdy2')) {
-        // Kontrola oprávnění - pouze výpravčí
-        if (!message.member.roles.cache.has(CONFIG.VYPRAVCI_ROLE_ID) && !message.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) && !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            message.reply('❌ Tento příkaz může používat pouze role 🚉 **Výpravčí**!');
-            return;
-        }
-
         const args = message.content.slice('!odjezdy2'.length).trim().split(' ');
         const stationId = args[0];
 
@@ -961,7 +955,8 @@ client.on('messageCreate', async message => {
                         foundStations.add(`${stop.pointId}:${stop.nameForPerson}`);
                         
                         // Hledáme stanici podle pointId a pouze odjezdy (departureTime)
-                        if (stop.pointId === stationId && stop.departureTime) {
+                        // Porovnej jako čísla i stringy pro jistotu
+                        if ((stop.pointId === stationId || stop.pointId === parseInt(stationId) || stop.pointId.toString() === stationId) && stop.departureTime) {
                             const departureTime = new Date(stop.departureTime);
                             const actualDepartureTime = stop.actualDepartureTime ? new Date(stop.actualDepartureTime) : null;
                             
