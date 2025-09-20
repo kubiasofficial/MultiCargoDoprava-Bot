@@ -273,6 +273,11 @@ client.on('messageCreate', async message => {
                     inline: false
                 },
                 {
+                    name: '🗺️ **API příkazy - informace o vlacích**',
+                    value: '• `!vlak [číslo]` - kompletní info o vlaku\n• `!trasa [číslo]` - zobrazí celou trasu s časy\n• `!pozice [číslo]` - aktuální pozice vlaku\n• `!stanice-info [ID]` - detaily o stanici',
+                    inline: false
+                },
+                {
                     name: ' **Systém pozic**',
                     value: '• Použijte tlačítka pro výběr pozice\n• 🚂 Strojvůdce - řízení vlaků\n• 🚉 Výpravčí - dispečerské funkce',
                     inline: false
@@ -285,6 +290,11 @@ client.on('messageCreate', async message => {
                 {
                     name: '🎯 **Bodový systém**',
                     value: '• **+10 bodů** za dokončenou jízdu\n• **+5 bonus** za dlouhé trasy (>50km)\n• **+3 bonus** za rychlé vlaky (>120 km/h)',
+                    inline: false
+                },
+                {
+                    name: '💡 **Tipy**',
+                    value: '• Používejte `!vlak [číslo]` před zahájením jízdy\n• `!pozice [číslo]` pro sledování pokroku\n• `!stanice-info 422` pro info o Warszawa Wschodnia',
                     inline: false
                 },
                 {
@@ -773,6 +783,454 @@ client.on('messageCreate', async message => {
         message.channel.send({ embeds: [embed] });
     }
 
+    // ===== PŘÍKAZ !VLAK [ČÍSLO] =====
+    if (message.content.startsWith('!vlak')) {
+        const args = message.content.slice('!vlak'.length).trim().split(' ');
+        const vlakoveCislo = args[0];
+
+        if (!vlakoveCislo || isNaN(vlakoveCislo)) {
+            message.reply('❌ Prosím, zadejte platné číslo vlaku. Příklad: `!vlak 32922`');
+            return;
+        }
+
+        try {
+            const response = await axios.get('https://api1.aws.simrail.eu:8082/api/getAllTimetables?serverCode=cz1');
+            const vlaky = response.data;
+
+            if (!Array.isArray(vlaky) || vlaky.length === 0) {
+                message.reply('❌ Momentálně nejsou dostupná data o vlacích. Zkuste to později.');
+                return;
+            }
+
+            // Najdi vlak podle čísla
+            const hledanyVlak = vlaky.find(vlak => 
+                vlak.trainNoLocal === vlakoveCislo || 
+                vlak.trainNoLocal === parseInt(vlakoveCislo)
+            );
+
+            if (!hledanyVlak) {
+                message.reply(`❌ Vlak s číslem **${vlakoveCislo}** nebyl nalezen.\n💡 Tip: Použijte \`!jizda\` pro zobrazení dostupných vlaků.`);
+                return;
+            }
+
+            // Informace o vlaku
+            const embed = new EmbedBuilder()
+                .setColor('#3498db')
+                .setTitle(`🚂 Vlak ${hledanyVlak.trainNoLocal}`)
+                .setDescription(`**${hledanyVlak.trainName || 'Bez názvu'}**`)
+                .addFields(
+                    { name: '🚉 Výchozí stanice', value: hledanyVlak.startStation || 'Neznámá', inline: true },
+                    { name: '🏁 Cílová stanice', value: hledanyVlak.endStation || 'Neznámá', inline: true },
+                    { name: '🚂 Lokomotiva', value: hledanyVlak.locoType || 'Neznámá', inline: true },
+                    { name: '⚖️ Váha', value: hledanyVlak.weight ? `${hledanyVlak.weight} t` : 'Neznámá', inline: true },
+                    { name: '📏 Délka', value: hledanyVlak.length ? `${hledanyVlak.length} m` : 'Neznámá', inline: true },
+                    { name: '🎯 Run ID', value: hledanyVlak.runId || 'Neznámé', inline: true }
+                )
+                .setFooter({ text: `Celkem zastávek: ${hledanyVlak.timetable ? hledanyVlak.timetable.length : 'Neznámo'} • Použijte !trasa ${vlakoveCislo} pro kompletní trasu` })
+                .setTimestamp();
+
+            // Přidej časy z první a poslední zastávky
+            if (hledanyVlak.timetable && hledanyVlak.timetable.length > 0) {
+                const prvniZastavka = hledanyVlak.timetable[0];
+                const posledniZastavka = hledanyVlak.timetable[hledanyVlak.timetable.length - 1];
+                
+                embed.addFields(
+                    { 
+                        name: '⏰ Časový rozpis', 
+                        value: `**Odjezd:** ${prvniZastavka.departureTime || 'N/A'}\n**Příjezd:** ${posledniZastavka.arrivalTime || 'N/A'}`, 
+                        inline: false 
+                    }
+                );
+            }
+
+            message.channel.send({ embeds: [embed] });
+
+        } catch (error) {
+            console.error('Chyba při získávání informací o vlaku:', error);
+            message.reply('❌ Došlo k chybě při získávání informací o vlaku. Zkuste to později.');
+        }
+    }
+
+    // ===== PŘÍKAZ !TRASA [ČÍSLO] =====
+    if (message.content.startsWith('!trasa')) {
+        const args = message.content.slice('!trasa'.length).trim().split(' ');
+        const vlakoveCislo = args[0];
+
+        if (!vlakoveCislo || isNaN(vlakoveCislo)) {
+            message.reply('❌ Prosím, zadejte platné číslo vlaku. Příklad: `!trasa 32922`');
+            return;
+        }
+
+        try {
+            const response = await axios.get('https://api1.aws.simrail.eu:8082/api/getAllTimetables?serverCode=cz1');
+            const vlaky = response.data;
+
+            if (!Array.isArray(vlaky) || vlaky.length === 0) {
+                message.reply('❌ Momentálně nejsou dostupná data o vlacích. Zkuste to později.');
+                return;
+            }
+
+            // Najdi vlak podle čísla
+            const hledanyVlak = vlaky.find(vlak => 
+                vlak.trainNoLocal === vlakoveCislo || 
+                vlak.trainNoLocal === parseInt(vlakoveCislo)
+            );
+
+            if (!hledanyVlak) {
+                message.reply(`❌ Vlak s číslem **${vlakoveCislo}** nebyl nalezen.\n💡 Tip: Použijte \`!vlak ${vlakoveCislo}\` pro základní info.`);
+                return;
+            }
+
+            if (!hledanyVlak.timetable || hledanyVlak.timetable.length === 0) {
+                message.reply(`❌ Pro vlak **${vlakoveCislo}** není dostupný časový rozpis.`);
+                return;
+            }
+
+            // Hlavní embed s informacemi o vlaku
+            const mainEmbed = new EmbedBuilder()
+                .setColor('#9b59b6')
+                .setTitle(`🗺️ Trasa vlaku ${hledanyVlak.trainNoLocal}`)
+                .setDescription(`**${hledanyVlak.trainName || 'Bez názvu'}**\n${hledanyVlak.startStation} → ${hledanyVlak.endStation}`)
+                .addFields(
+                    { name: '🚂 Lokomotiva', value: hledanyVlak.locoType || 'Neznámá', inline: true },
+                    { name: '📊 Zastávek celkem', value: `${hledanyVlak.timetable.length}`, inline: true },
+                    { name: '🎯 Run ID', value: hledanyVlak.runId || 'Neznámé', inline: true }
+                );
+
+            // Vytvoř seznam zastávek - omez na prvních 20 kvůli délce
+            const maxStops = 20;
+            const stops = hledanyVlak.timetable.slice(0, maxStops);
+            let trasaText = '';
+
+            stops.forEach((stop, index) => {
+                const emoji = index === 0 ? '🚉' : index === stops.length - 1 && index < hledanyVlak.timetable.length - 1 ? '⭐' : index === hledanyVlak.timetable.length - 1 ? '🏁' : '▫️';
+                const arrTime = stop.arrivalTime || '--:--';
+                const depTime = stop.departureTime || '--:--';
+                const platform = stop.platform ? ` | ${stop.platform}` : '';
+                const track = stop.track ? ` | ${stop.track}` : '';
+                
+                if (index === 0) {
+                    trasaText += `${emoji} **${stop.nameOfPoint}** | Odjezd: **${depTime}**${platform}${track}\n`;
+                } else if (index === hledanyVlak.timetable.length - 1) {
+                    trasaText += `${emoji} **${stop.nameOfPoint}** | Příjezd: **${arrTime}**${platform}${track}\n`;
+                } else {
+                    if (arrTime === depTime) {
+                        trasaText += `${emoji} ${stop.nameOfPoint} | **${arrTime}**${platform}${track}\n`;
+                    } else {
+                        trasaText += `${emoji} ${stop.nameOfPoint} | ${arrTime} - ${depTime}${platform}${track}\n`;
+                    }
+                }
+            });
+
+            if (hledanyVlak.timetable.length > maxStops) {
+                trasaText += `\n... a ${hledanyVlak.timetable.length - maxStops} dalších zastávek`;
+            }
+
+            const routeEmbed = new EmbedBuilder()
+                .setColor('#3498db')
+                .setTitle('🚉 Časový rozpis')
+                .setDescription(trasaText)
+                .setFooter({ text: `${stops.length}/${hledanyVlak.timetable.length} zastávek • Použijte !pozice ${vlakoveCislo} pro aktuální pozici` });
+
+            message.channel.send({ embeds: [mainEmbed, routeEmbed] });
+
+        } catch (error) {
+            console.error('Chyba při získávání trasy vlaku:', error);
+            message.reply('❌ Došlo k chybě při získávání trasy vlaku. Zkuste to později.');
+        }
+    }
+
+    // ===== PŘÍKAZ !POZICE [ČÍSLO] =====
+    if (message.content.startsWith('!pozice')) {
+        const args = message.content.slice('!pozice'.length).trim().split(' ');
+        const vlakoveCislo = args[0];
+
+        if (!vlakoveCislo || isNaN(vlakoveCislo)) {
+            message.reply('❌ Prosím, zadejte platné číslo vlaku. Příklad: `!pozice 32922`');
+            return;
+        }
+
+        try {
+            const response = await axios.get('https://api1.aws.simrail.eu:8082/api/getAllTimetables?serverCode=cz1');
+            const vlaky = response.data;
+
+            if (!Array.isArray(vlaky) || vlaky.length === 0) {
+                message.reply('❌ Momentálně nejsou dostupná data o vlacích. Zkuste to později.');
+                return;
+            }
+
+            // Najdi vlak podle čísla
+            const hledanyVlak = vlaky.find(vlak => 
+                vlak.trainNoLocal === vlakoveCislo || 
+                vlak.trainNoLocal === parseInt(vlakoveCislo)
+            );
+
+            if (!hledanyVlak) {
+                message.reply(`❌ Vlak s číslem **${vlakoveCislo}** nebyl nalezen.`);
+                return;
+            }
+
+            if (!hledanyVlak.timetable || hledanyVlak.timetable.length === 0) {
+                message.reply(`❌ Pro vlak **${vlakoveCislo}** není dostupný časový rozpis.`);
+                return;
+            }
+
+            // Získej aktuální čas v UTC (SimRail používá UTC časy)
+            const now = new Date();
+            const currentTime = now.toISOString().substring(11, 16); // HH:MM format
+
+            // Funkce pro převod času na minuty
+            function timeToMinutes(timeStr) {
+                if (!timeStr || timeStr === '--:--') return -1;
+                const [hours, minutes] = timeStr.split(':').map(Number);
+                return hours * 60 + minutes;
+            }
+
+            const currentMinutes = timeToMinutes(currentTime);
+            let currentPosition = null;
+            let nextStation = null;
+            let previousStation = null;
+
+            // Najdi aktuální pozici na trase
+            for (let i = 0; i < hledanyVlak.timetable.length; i++) {
+                const stop = hledanyVlak.timetable[i];
+                const arrTime = timeToMinutes(stop.arrivalTime);
+                const depTime = timeToMinutes(stop.departureTime);
+
+                if (i === 0) {
+                    // První zastávka - pouze odjezd
+                    if (currentMinutes < timeToMinutes(stop.departureTime)) {
+                        currentPosition = { type: 'waiting', station: stop, index: i };
+                        break;
+                    }
+                } else if (i === hledanyVlak.timetable.length - 1) {
+                    // Poslední zastávka - pouze příjezd
+                    if (currentMinutes >= arrTime) {
+                        currentPosition = { type: 'arrived', station: stop, index: i };
+                        break;
+                    }
+                } else {
+                    // Mezilehlé zastávky
+                    if (currentMinutes >= arrTime && currentMinutes <= depTime) {
+                        currentPosition = { type: 'at_station', station: stop, index: i };
+                        break;
+                    }
+                }
+
+                // Vlak mezi zastávkami
+                if (i < hledanyVlak.timetable.length - 1) {
+                    const nextStop = hledanyVlak.timetable[i + 1];
+                    const currentDepTime = depTime !== -1 ? depTime : arrTime;
+                    const nextArrTime = timeToMinutes(nextStop.arrivalTime);
+
+                    if (currentMinutes > currentDepTime && currentMinutes < nextArrTime) {
+                        currentPosition = { 
+                            type: 'between', 
+                            from: stop, 
+                            to: nextStop, 
+                            index: i 
+                        };
+                        break;
+                    }
+                }
+            }
+
+            if (!currentPosition) {
+                // Vlak ještě nezačal nebo už skončil
+                const firstDep = timeToMinutes(hledanyVlak.timetable[0].departureTime);
+                const lastArr = timeToMinutes(hledanyVlak.timetable[hledanyVlak.timetable.length - 1].arrivalTime);
+                
+                if (currentMinutes < firstDep) {
+                    currentPosition = { type: 'not_started', station: hledanyVlak.timetable[0] };
+                } else if (currentMinutes > lastArr) {
+                    currentPosition = { type: 'finished', station: hledanyVlak.timetable[hledanyVlak.timetable.length - 1] };
+                }
+            }
+
+            // Vytvoř embed s pozicí
+            const embed = new EmbedBuilder()
+                .setColor('#f39c12')
+                .setTitle(`📍 Pozice vlaku ${hledanyVlak.trainNoLocal}`)
+                .setDescription(`**${hledanyVlak.trainName || 'Bez názvu'}**`)
+                .addFields({ name: '🕐 Aktuální čas', value: currentTime, inline: true });
+
+            let statusText = '';
+            let statusColor = '#f39c12';
+
+            switch (currentPosition?.type) {
+                case 'not_started':
+                    statusText = `🔴 **Vlak ještě nevyjel**\nOdjezd z **${currentPosition.station.nameOfPoint}** v **${currentPosition.station.departureTime}**`;
+                    statusColor = '#e74c3c';
+                    break;
+                case 'waiting':
+                    statusText = `🟡 **Připraven k odjezdu**\nStanice: **${currentPosition.station.nameOfPoint}**\nOdjezd: **${currentPosition.station.departureTime}**`;
+                    statusColor = '#f1c40f';
+                    break;
+                case 'at_station':
+                    statusText = `🟢 **Stojí ve stanici**\n**${currentPosition.station.nameOfPoint}**\nOdjezd: **${currentPosition.station.departureTime}**`;
+                    if (currentPosition.station.platform) statusText += `\nNástup.: **${currentPosition.station.platform}**`;
+                    statusColor = '#27ae60';
+                    break;
+                case 'between':
+                    statusText = `🚂 **Jede mezi stanicemi**\n**${currentPosition.from.nameOfPoint}** → **${currentPosition.to.nameOfPoint}**\nPříjezd: **${currentPosition.to.arrivalTime}**`;
+                    statusColor = '#3498db';
+                    break;
+                case 'arrived':
+                    statusText = `🏁 **Vlak dorazil do cíle**\n**${currentPosition.station.nameOfPoint}**\nPříjezd: **${currentPosition.station.arrivalTime}**`;
+                    statusColor = '#9b59b6';
+                    break;
+                case 'finished':
+                    statusText = `⚫ **Vlak ukončil jízdu**\nCílová stanice: **${currentPosition.station.nameOfPoint}**`;
+                    statusColor = '#95a5a6';
+                    break;
+                default:
+                    statusText = '❓ **Nelze určit pozici**\nData o pozici nejsou k dispozici';
+                    statusColor = '#e74c3c';
+            }
+
+            embed.setColor(statusColor);
+            embed.addFields({ name: '📍 Aktuální stav', value: statusText, inline: false });
+
+            // Přidej další/předchozí zastávky pokud jsou relevantní
+            if (currentPosition && currentPosition.index !== undefined) {
+                const nextStops = hledanyVlak.timetable.slice(currentPosition.index + 1, currentPosition.index + 4);
+                if (nextStops.length > 0) {
+                    let nextText = nextStops.map(stop => 
+                        `• **${stop.nameOfPoint}** - ${stop.arrivalTime || stop.departureTime}`
+                    ).join('\n');
+                    embed.addFields({ name: '⏭️ Následující zastávky', value: nextText, inline: false });
+                }
+            }
+
+            embed.setFooter({ text: `Použijte !trasa ${vlakoveCislo} pro kompletní trasu` });
+            embed.setTimestamp();
+
+            message.channel.send({ embeds: [embed] });
+
+        } catch (error) {
+            console.error('Chyba při získávání pozice vlaku:', error);
+            message.reply('❌ Došlo k chybě při získávání pozice vlaku. Zkuste to později.');
+        }
+    }
+
+    // ===== PŘÍKAZ !STANICE-INFO [ID] =====
+    if (message.content.startsWith('!stanice-info') || message.content.startsWith('!stanice')) {
+        const args = message.content.split(' ')[1];
+        const stationId = args;
+
+        if (!stationId) {
+            message.reply('❌ Prosím, zadejte ID stanice. Příklad: `!stanice-info 422`\n💡 Nejpoužívanější: 422 (Warszawa Wschodnia), 4288 (Kraków Główny), 4250 (Kraków Płaszów)');
+            return;
+        }
+
+        try {
+            const response = await axios.get('https://api1.aws.simrail.eu:8082/api/getAllTimetables?serverCode=cz1');
+            const vlaky = response.data;
+
+            if (!Array.isArray(vlaky) || vlaky.length === 0) {
+                message.reply('❌ Momentálně nejsou dostupná data o vlacích. Zkuste to později.');
+                return;
+            }
+
+            // Najdi všechny vlaky, které projíždějí touto stanicí
+            const vlakyVeStanici = [];
+            let stationName = null;
+
+            vlaky.forEach(vlak => {
+                if (vlak.timetable && Array.isArray(vlak.timetable)) {
+                    vlak.timetable.forEach(stop => {
+                        if (stop.pointId === stationId || stop.pointId === parseInt(stationId)) {
+                            if (!stationName) stationName = stop.nameOfPoint;
+                            vlakyVeStanici.push({
+                                trainNo: vlak.trainNoLocal,
+                                trainName: vlak.trainName,
+                                arrivalTime: stop.arrivalTime,
+                                departureTime: stop.departureTime,
+                                platform: stop.platform,
+                                track: stop.track,
+                                stopType: stop.stopType,
+                                startStation: vlak.startStation,
+                                endStation: vlak.endStation,
+                                locoType: vlak.locoType
+                            });
+                        }
+                    });
+                }
+            });
+
+            if (vlakyVeStanici.length === 0) {
+                message.reply(`❌ Stanice s ID **${stationId}** nebyla nalezena nebo jí neprojíždí žádné vlaky.\n💡 Zkuste jiné ID nebo použijte \`!id\` pro seznam nejpoužívanějších stanic.`);
+                return;
+            }
+
+            // Seřaď vlaky podle času
+            vlakyVeStanici.sort((a, b) => {
+                const timeA = a.arrivalTime || a.departureTime || '00:00';
+                const timeB = b.arrivalTime || b.departureTime || '00:00';
+                return timeA.localeCompare(timeB);
+            });
+
+            // Hlavní embed
+            const mainEmbed = new EmbedBuilder()
+                .setColor('#e67e22')
+                .setTitle(`🚉 ${stationName || 'Neznámá stanice'}`)
+                .setDescription(`**ID stanice:** ${stationId}`)
+                .addFields(
+                    { name: '🚂 Celkem vlaků', value: `${vlakyVeStanici.length}`, inline: true },
+                    { name: '📊 Údaje k dispozici', value: 'Časy, nástupiště, koleje', inline: true },
+                    { name: '🔄 Aktualizace', value: 'V reálném čase', inline: true }
+                );
+
+            // Seznam vlaků - omez na prvních 15
+            const maxTrains = 15;
+            const displayTrains = vlakyVeStanici.slice(0, maxTrains);
+            let vlakText = '';
+
+            displayTrains.forEach(vlak => {
+                const timeInfo = vlak.arrivalTime && vlak.departureTime && vlak.arrivalTime !== vlak.departureTime 
+                    ? `${vlak.arrivalTime} - ${vlak.departureTime}`
+                    : vlak.arrivalTime || vlak.departureTime || '--:--';
+                
+                const platformInfo = vlak.platform ? ` | ${vlak.platform}` : '';
+                const trackInfo = vlak.track ? ` | ${vlak.track}` : '';
+                
+                vlakText += `🚂 **${vlak.trainNo}** (${vlak.trainName || 'bez názvu'})\n`;
+                vlakText += `⏰ ${timeInfo}${platformInfo}${trackInfo}\n`;
+                vlakText += `📍 ${vlak.startStation} → ${vlak.endStation}\n\n`;
+            });
+
+            if (vlakyVeStanici.length > maxTrains) {
+                vlakText += `... a ${vlakyVeStanici.length - maxTrains} dalších vlaků`;
+            }
+
+            const trainsEmbed = new EmbedBuilder()
+                .setColor('#3498db')
+                .setTitle('🚂 Projíždějící vlaky')
+                .setDescription(vlakText || 'Žádné vlaky nenalezeny')
+                .setFooter({ text: `${displayTrains.length}/${vlakyVeStanici.length} vlaků • Seřazeno podle času` });
+
+            // Statistiky
+            const osobniVlaky = vlakyVeStanici.filter(v => !v.locoType || v.locoType.includes('EN') || v.trainName?.includes('IC') || v.trainName?.includes('EC')).length;
+            const nakladniVlaky = vlakyVeStanici.filter(v => v.locoType && (v.locoType.includes('ET22') || v.locoType.includes('SM42'))).length;
+
+            const statsEmbed = new EmbedBuilder()
+                .setColor('#27ae60')
+                .setTitle('📊 Statistiky stanice')
+                .addFields(
+                    { name: '👥 Osobní doprava', value: `${osobniVlaky} vlaků`, inline: true },
+                    { name: '📦 Nákladní doprava', value: `${nakladniVlaky} vlaků`, inline: true },
+                    { name: '🎯 Využití', value: vlakyVeStanici.length > 20 ? 'Vysoké' : vlakyVeStanici.length > 10 ? 'Střední' : 'Nízké', inline: true }
+                )
+                .setFooter({ text: 'Použijte !vlak [číslo] pro detail konkrétního vlaku' });
+
+            message.channel.send({ embeds: [mainEmbed, trainsEmbed, statsEmbed] });
+
+        } catch (error) {
+            console.error('Chyba při získávání informací o stanici:', error);
+            message.reply('❌ Došlo k chybě při získávání informací o stanici. Zkuste to později.');
+        }
+    }
+
     // ===== ADMIN PŘÍKAZY PRO SCHVALOVÁNÍ V TICKET KANÁLECH =====
     if (message.content.startsWith('!schválit') || message.content.startsWith('!schvalit')) {
         // Zkontroluj admin oprávnění
@@ -1243,9 +1701,5 @@ client.on('interactionCreate', async interaction => {
         }, 5000);
     }
 });
-
-client.login(process.env.DISCORD_TOKEN);
-
-
 
 client.login(process.env.DISCORD_TOKEN);
