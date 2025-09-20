@@ -274,7 +274,7 @@ client.on('messageCreate', async message => {
                 },
                 {
                     name: '🚉 **EDR příkazy** (pouze výpravčí)',
-                    value: '• `!rozvrh [ID]` - rozvrh stanice\n• `!odjezdy [ID]` - nejbližší odjezdy\n• `!spoj [číslo]` - info o konkrétním vlaku\n• `!stanice` - seznam všech ID stanic\n• `!id` - nejpoužívanější stanice',
+                    value: '• `!rozvrh [ID]` - rozvrh stanice\n• `!odjezdy [ID]` - nejbližších 5 odjezdů\n• `!prijezdy [ID]` - nejbližších 5 příjezdů\n• `!spoj [číslo]` - info o konkrétním vlaku\n• `!stanice` - seznam všech ID stanic\n• `!id` - nejpoužívanější stanice',
                     inline: false
                 },
                 {
@@ -727,31 +727,147 @@ client.on('messageCreate', async message => {
 
         try {
             const response = await axios.get(`http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs`);
+            const htmlContent = response.data;
             
+            // Parsování HTML pro odjezdy (hledáme tabulku s odjezdy)
+            const odjezdyMatch = htmlContent.match(/<h3[^>]*>.*?Odjezdy.*?<\/h3>(.*?)<h3|<h3[^>]*>.*?Departures.*?<\/h3>(.*?)<h3/is);
+            let odjezdyData = [];
+            
+            if (odjezdyMatch) {
+                const tableContent = odjezdyMatch[1] || odjezdyMatch[2];
+                // Parsování řádků tabulky
+                const rows = tableContent.match(/<tr[^>]*>(.*?)<\/tr>/gis);
+                
+                if (rows) {
+                    for (let i = 1; i < Math.min(6, rows.length); i++) { // První 5 odjezdů (přeskočit header)
+                        const cells = rows[i].match(/<td[^>]*>(.*?)<\/td>/gis);
+                        if (cells && cells.length >= 4) {
+                            const cas = cells[0].replace(/<[^>]*>/g, '').trim();
+                            const vlak = cells[1].replace(/<[^>]*>/g, '').trim();
+                            const smer = cells[2].replace(/<[^>]*>/g, '').trim();
+                            const kolej = cells[3].replace(/<[^>]*>/g, '').trim();
+                            
+                            if (cas && vlak) {
+                                odjezdyData.push(`🕐 **${cas}** | 🚂 ${vlak} | 📍 ${smer}${kolej ? ` | 🛤️ ${kolej}` : ''}`);
+                            }
+                        }
+                    }
+                }
+            }
+
             const embed = new EmbedBuilder()
                 .setColor('#f39c12')
-                .setTitle(`⏰ Nejbližší odjezdy (ID: ${stationId})`)
+                .setTitle(`⏰ Nejbližších 5 odjezdů (ID: ${stationId})`)
                 .setDescription('🚂 Aktuální odjezdy z vybrané stanice')
-                .addFields(
-                    {
-                        name: '📊 EDR Data',
-                        value: 'Data jsou získávána v reálném čase ze SimRail EDR systému',
-                        inline: false
-                    },
-                    {
-                        name: '🔗 Detailní info',
-                        value: `[Zobrazit kompletní rozvrh](http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs)`,
-                        inline: false
-                    }
-                )
                 .setFooter({ text: 'MultiCargo Doprava • EDR System' })
                 .setTimestamp();
+
+            if (odjezdyData.length > 0) {
+                embed.addFields({
+                    name: '� Odjezdy vlaků',
+                    value: odjezdyData.join('\n'),
+                    inline: false
+                });
+            } else {
+                embed.addFields({
+                    name: '❌ Žádné odjezdy',
+                    value: 'V tuto chvíli nejsou plánovány žádné odjezdy nebo došlo k chybě při parsování dat.',
+                    inline: false
+                });
+            }
+
+            embed.addFields({
+                name: '🔗 Kompletní rozvrh',
+                value: `[Zobrazit všechny odjezdy](http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs)`,
+                inline: false
+            });
 
             message.channel.send({ embeds: [embed] });
 
         } catch (error) {
             console.error('Chyba při načítání odjezdů:', error);
             message.reply('❌ Došlo k chybě při načítání odjezdů. Zkontrolujte ID stanice.');
+        }
+    }
+
+    // ===== PŘÍKAZ !PRIJEZDY =====
+    if (message.content.startsWith('!prijezdy')) {
+        // Kontrola oprávnění - pouze výpravčí
+        if (!message.member.roles.cache.has(CONFIG.VYPRAVCI_ROLE_ID) && !message.member.roles.cache.has(CONFIG.ADMIN_ROLE_ID) && !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            message.reply('❌ Tento příkaz může používat pouze role 🚉 **Výpravčí**!');
+            return;
+        }
+
+        const args = message.content.slice('!prijezdy'.length).trim().split(' ');
+        const stationId = args[0];
+
+        if (!stationId || isNaN(stationId)) {
+            message.reply('❌ Zadejte platné ID stanice. Příklad: `!prijezdy 3991`');
+            return;
+        }
+
+        try {
+            const response = await axios.get(`http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs`);
+            const htmlContent = response.data;
+            
+            // Parsování HTML pro příjezdy
+            const prijezdyMatch = htmlContent.match(/<h3[^>]*>.*?Příjezdy.*?<\/h3>(.*?)<h3|<h3[^>]*>.*?Arrivals.*?<\/h3>(.*?)<h3/is);
+            let prijezdyData = [];
+            
+            if (prijezdyMatch) {
+                const tableContent = prijezdyMatch[1] || prijezdyMatch[2];
+                // Parsování řádků tabulky
+                const rows = tableContent.match(/<tr[^>]*>(.*?)<\/tr>/gis);
+                
+                if (rows) {
+                    for (let i = 1; i < Math.min(6, rows.length); i++) { // První 5 příjezdů (přeskočit header)
+                        const cells = rows[i].match(/<td[^>]*>(.*?)<\/td>/gis);
+                        if (cells && cells.length >= 4) {
+                            const cas = cells[0].replace(/<[^>]*>/g, '').trim();
+                            const vlak = cells[1].replace(/<[^>]*>/g, '').trim();
+                            const odkud = cells[2].replace(/<[^>]*>/g, '').trim();
+                            const kolej = cells[3].replace(/<[^>]*>/g, '').trim();
+                            
+                            if (cas && vlak) {
+                                prijezdyData.push(`🕐 **${cas}** | 🚂 ${vlak} | 📍 ${odkud}${kolej ? ` | 🛤️ ${kolej}` : ''}`);
+                            }
+                        }
+                    }
+                }
+            }
+
+            const embed = new EmbedBuilder()
+                .setColor('#e74c3c')
+                .setTitle(`🚄 Nejbližších 5 příjezdů (ID: ${stationId})`)
+                .setDescription('🚂 Aktuální příjezdy do vybrané stanice')
+                .setFooter({ text: 'MultiCargo Doprava • EDR System' })
+                .setTimestamp();
+
+            if (prijezdyData.length > 0) {
+                embed.addFields({
+                    name: '🚄 Příjezdy vlaků',
+                    value: prijezdyData.join('\n'),
+                    inline: false
+                });
+            } else {
+                embed.addFields({
+                    name: '❌ Žádné příjezdy',
+                    value: 'V tuto chvíli nejsou plánovány žádné příjezdy nebo došlo k chybě při parsování dat.',
+                    inline: false
+                });
+            }
+
+            embed.addFields({
+                name: '🔗 Kompletní rozvrh',
+                value: `[Zobrazit všechny příjezdy](http://api1.aws.simrail.eu:8092/?serverCode=cz1&stationId=${stationId}&lang=cs)`,
+                inline: false
+            });
+
+            message.channel.send({ embeds: [embed] });
+
+        } catch (error) {
+            console.error('Chyba při načítání příjezdů:', error);
+            message.reply('❌ Došlo k chybě při načítání příjezdů. Zkontrolujte ID stanice.');
         }
     }
 
@@ -795,7 +911,7 @@ client.on('messageCreate', async message => {
                 },
                 {
                     name: '⚡ **Užitečné tipy**',
-                    value: '• `!rozvrh [ID]` - kompletní rozvrh stanice\n• `!odjezdy [ID]` - nejbližší odjezdy\n• `!spoj [číslo]` - info o konkrétním vlaku\n• Některé stanice mohou být dočasně nedostupné',
+                    value: '• `!rozvrh [ID]` - kompletní rozvrh stanice\n• `!odjezdy [ID]` - nejbližších 5 odjezdů\n• `!prijezdy [ID]` - nejbližších 5 příjezdů\n• `!spoj [číslo]` - info o konkrétním vlaku\n• Některé stanice mohou být dočasně nedostupné',
                     inline: false
                 },
                 {
@@ -835,7 +951,7 @@ client.on('messageCreate', async message => {
                 },
                 {
                     name: '⚡ **Rychlé použití**',
-                    value: '`!rozvrh 422` - rozvrh Warszawa Ws.\n`!odjezdy 4288` - odjezdy Kraków Gl.\n`!stanice` - kompletní seznam',
+                    value: '`!rozvrh 422` - rozvrh Warszawa Ws.\n`!odjezdy 4288` - odjezdy Kraków Gl.\n`!prijezdy 3991` - příjezdy Katowice\n`!stanice` - kompletní seznam',
                     inline: false
                 }
             )
