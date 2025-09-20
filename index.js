@@ -1887,31 +1887,48 @@ client.on('messageCreate', async (message) => {
             const response = await axios.get(`https://api1.aws.simrail.eu:8082/api/getEDRTimetables?serverCode=cz1`);
             const trains = response.data;
             
+            console.log(`🔍 Debug odjezdy3: Hledám stanici "${stationId}" (type: ${typeof stationId})`);
+            
             // Najdi odjezdy pro tuto stanici
             let departures = [];
             const currentTime = new Date();
+            let debugStations = new Set();
+            let matchFound = false;
             
             for (const train of trains) {
                 if (train.timetable && Array.isArray(train.timetable)) {
                     for (const stop of train.timetable) {
+                        // Debug: sbírej všechna ID a jejich typy
+                        debugStations.add(`${stop.pointId} (${typeof stop.pointId}): ${stop.nameForPerson}`);
+                        
                         // Zkus všechny možné typy porovnání ID
+                        const stationIdNum = parseInt(stationId);
+                        const stopIdNum = parseInt(stop.pointId);
+                        const stationIdStr = String(stationId);
+                        const stopIdStr = String(stop.pointId);
+                        
                         const matchesStation = stop.pointId === stationId || 
-                                             stop.pointId === parseInt(stationId) || 
-                                             stop.pointId.toString() === stationId;
+                                             stop.pointId === stationIdNum || 
+                                             stopIdNum === stationIdNum ||
+                                             stopIdStr === stationIdStr;
+                        
+                        if (matchesStation) {
+                            matchFound = true;
+                            console.log(`✅ Shoda nalezena: hledané "${stationId}" vs "${stop.pointId}" ve stanici ${stop.nameForPerson}`);
+                        }
                         
                         if (matchesStation && stop.departureTime) {
                             const departureTime = new Date(stop.departureTime);
                             
-                            // Přidej jen budoucí odjezdy
-                            if (departureTime > currentTime) {
-                                departures.push({
-                                    time: departureTime,
-                                    train: train.trainNoLocal || train.trainName || 'N/A',
-                                    destination: train.endStation || 'Neznámý cíl',
-                                    platform: stop.platform || stop.track || '',
-                                    stationName: stop.nameForPerson
-                                });
-                            }
+                            // Přidej VŠECHNY odjezdy pro debug (nefiltruj podle času)
+                            departures.push({
+                                time: departureTime,
+                                train: train.trainNoLocal || train.trainName || 'N/A',
+                                destination: train.endStation || 'Neznámý cíl',
+                                platform: stop.platform || stop.track || '',
+                                stationName: stop.nameForPerson,
+                                isFuture: departureTime > currentTime
+                            });
                         }
                     }
                 }
@@ -1923,38 +1940,38 @@ client.on('messageCreate', async (message) => {
             
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
-                .setTitle(`🚂 Odjezdy ze stanice ${stationId}`)
-                .setDescription(first5.length > 0 ? `Nalezeno ${departures.length} odjezdů` : 'Žádné budoucí odjezdy')
+                .setTitle(`🚂 Debug Odjezdy3 - Stanice ${stationId}`)
+                .setDescription(`Hledání stanice "${stationId}" (${typeof stationId})`)
                 .setTimestamp();
 
-            if (first5.length > 0) {
-                const stationName = first5[0].stationName || 'Neznámá stanice';
+            if (matchFound && departures.length > 0) {
+                const stationName = departures[0].stationName || 'Neznámá stanice';
+                
                 embed.addFields({
-                    name: `🚄 ${stationName}`,
+                    name: `✅ ${stationName} - Nalezeno ${departures.length} odjezdů`,
                     value: first5.map(dep => {
                         const timeStr = dep.time.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
                         const platform = dep.platform ? ` | 🛤️ ${dep.platform}` : '';
-                        return `🕐 **${timeStr}** | 🚂 ${dep.train} | 📍 → ${dep.destination}${platform}`;
+                        const status = dep.isFuture ? '🟢' : '🔴';
+                        return `${status} **${timeStr}** | 🚂 ${dep.train} | 📍 → ${dep.destination}${platform}`;
                     }).join('\n'),
                     inline: false
                 });
-            } else {
-                // Ukáž dostupné stanice pro debug
-                const allStations = new Set();
-                trains.forEach(train => {
-                    if (train.timetable) {
-                        train.timetable.forEach(stop => {
-                            if (stop.departureTime) {
-                                allStations.add(`${stop.pointId}: ${stop.nameForPerson}`);
-                            }
-                        });
-                    }
+            } else if (matchFound && departures.length === 0) {
+                embed.addFields({
+                    name: '⚠️ Stanice nalezena, ale žádné odjezdy',
+                    value: `Stanice "${stationId}" existuje, ale nemá naplánované odjezdy v tomto čase.`,
+                    inline: false
                 });
+            } else {
+                // Ukáž dostupné stanice pro debug - konkrétně s ID kolem 422
+                const allStations = Array.from(debugStations);
+                const filteredStations = allStations.filter(s => s.includes('422') || s.includes('420') || s.includes('424') || s.includes('4288') || s.includes('3991')).slice(0, 10);
+                const randomStations = allStations.slice(0, 10);
                 
-                const sampleStations = Array.from(allStations).slice(0, 5);
                 embed.addFields({
                     name: '❌ Stanice nenalezena',
-                    value: `ID "${stationId}" neexistuje.\n\n**Příklad aktivních stanic:**\n${sampleStations.map(s => `• ${s}`).join('\n')}`,
+                    value: `ID "${stationId}" neexistuje.\n\n**Stanice obsahující 422/420/424:**\n${filteredStations.join('\n')}\n\n**Náhodné stanice:**\n${randomStations.join('\n')}`,
                     inline: false
                 });
             }
