@@ -25,23 +25,30 @@ let sheets = null;
 
 async function initializeGoogleSheets() {
     try {
+        console.log('🔍 Začátek inicializace Google Sheets...');
+        
         if (!process.env.GOOGLE_CREDENTIALS) {
             console.log('⚠️ Google Sheets credentials nejsou nastavené');
             return false;
         }
-
-        const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
         
+        console.log('🔍 Parsing JSON credentials...');
+        const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+        console.log('✅ JSON credentials úspěšně parsovány');
+        
+        console.log('🔍 Vytvářím Google Auth...');
         sheetsAuth = new google.auth.GoogleAuth({
             credentials: credentials,
             scopes: ['https://www.googleapis.com/auth/spreadsheets']
         });
+        console.log('✅ Google Auth vytvořen');
 
+        console.log('🔍 Vytvářím Sheets API klienta...');
         sheets = google.sheets({ version: 'v4', auth: sheetsAuth });
         console.log('✅ Google Sheets připojeno úspěšně!');
         return true;
     } catch (error) {
-        console.error('❌ Chyba při připojování k Google Sheets:', error);
+        console.error('❌ Chyba při připojování k Google Sheets:', error.message);
         return false;
     }
 }
