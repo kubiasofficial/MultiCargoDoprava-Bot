@@ -11,6 +11,7 @@ const CONFIG = {
     EMPLOYEE_ROLE_ID: '1418604088693882900', // 👔 Zaměstnanec
     CATEGORY_ID: '1418606519494246400', // Kategorie pro ticket kanály s přihláškami
     DISPATCHER_CHANNEL_ID: '1418624695829532764', // Kanál pro zprávy o jízdách (dispatcher)
+    ACTIVE_RIDES_CHANNEL_ID: '1419230177585528842', // Kanál pro live tracking aktivních jízd
     
     // Role pozic (budete muset přidat skutečné ID rolí)
     STROJVUDCE_ROLE_ID: '1418875308811223123', // 🚂 Strojvůdce
@@ -108,7 +109,7 @@ const activeApplications = new Map();
 const activeZakazky = new Map(); // zakazkaId -> { channelId, vypravci, assignedUser, vlakCislo, created }
 
 // ===== DATABÁZE PRO SLEDOVÁNÍ JÍZD =====
-const aktivniJizdy = new Map(); // userId -> { vlakCislo, startCas, startStanice, cilStanice, trainName }
+const aktivniJizdy = new Map(); // userId -> { vlakCislo, startCas, startStanice, cilStanice, trainName, trackingMessageId, trackingChannelId }
 const dokonceneJizdy = new Map(); // userId -> [ {vlakCislo, startCas, konecCas, doba, trasa, body} ]
 const userStats = new Map(); // userId -> { celkoveBody, uroven, streak, posledniJizda }
 
@@ -263,7 +264,76 @@ client.on('ready', async () => {
     
     // Inicializuj Google Sheets
     await initializeGoogleSheets();
+    
+    // ===== SPUŠTĚNÍ AUTOMATICKÝCH AKTUALIZACÍ LIVE TRACKING =====
+    console.log('🔄 Spouštím automatické aktualizace live tracking...');
+    setInterval(async () => {
+        try {
+            for (const [userId, jizda] of aktivniJizdy) {
+                if (jizda.trackingMessageId && jizda.trackingChannelId) {
+                    // Vypočítej aktuální dobu jízdy
+                    const currentDuration = Math.round((Date.now() - jizda.startCas) / (1000 * 60)); // v minutách
+                    const estimatedDuration = jizda.estimatedDuration || 60;
+                    
+                    // Aktualizuj progress bar
+                    const progressBar = createProgressBar(currentDuration, estimatedDuration);
+                    
+                    // Vytvoř aktualizovaný embed
+                    const updatedEmbed = new EmbedBuilder()
+                        .setColor('#ffff00')
+                        .setTitle(`🚂 Jízda vlaku ${jizda.vlakCislo}`)
+                        .setDescription(progressBar)
+                        .addFields(
+                            { name: '🚉 Trasa', value: `${jizda.startStanice} ──────●────── ${jizda.cilStanice}`, inline: false },
+                            { name: '⏱️ Doba jízdy', value: `${currentDuration}/${estimatedDuration} minut`, inline: true },
+                            { name: '📍 Aktuálně', value: jizda.startStanice, inline: true },
+                            { name: '👤 Strojvůdce', value: `<@${userId}>`, inline: true }
+                        )
+                        .setThumbnail(client.users.cache.get(userId)?.displayAvatarURL() || null)
+                        .setFooter({ text: `${jizda.trainName} • Live tracking` })
+                        .setTimestamp();
+
+                    // Aktualizuj embed
+                    try {
+                        const channel = await client.channels.fetch(jizda.trackingChannelId);
+                        const message = await channel.messages.fetch(jizda.trackingMessageId);
+                        await message.edit({ embeds: [updatedEmbed] });
+                        console.log(`🔄 Aktualizován live tracking pro vlak ${jizda.vlakCislo}`);
+                    } catch (error) {
+                        console.error(`❌ Chyba při aktualizaci live tracking pro ${jizda.vlakCislo}:`, error);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('❌ Chyba v automatických aktualizacích:', error);
+        }
+    }, 5 * 60 * 1000); // 5 minut v milisekundách
 });
+
+// ===== FUNKCE PRO PROGRESS BAR A LIVE TRACKING =====
+function createProgressBar(current, total) {
+    const percent = Math.round((current / total) * 100);
+    const filled = Math.round(percent / 6.25); // 16 symbolů max
+    const empty = 16 - filled;
+    return '━'.repeat(filled) + '░'.repeat(empty) + ` ${percent}%`;
+}
+
+// Předpokládaná doba jízdy (pro progress bar) - můžeme rozšířit na skutečná data z API
+function getEstimatedDuration(startStation, endStation) {
+    // Základní odhady - později můžeme nahradit skutečnými daty z SimRail API
+    const distances = {
+        'Praha': { 'Brno': 90, 'Ostrava': 180, 'Bratislava': 120 },
+        'Brno': { 'Praha': 90, 'Ostrava': 120, 'Bratislava': 90 },
+        'Ostrava': { 'Praha': 180, 'Brno': 120, 'Bratislava': 150 },
+        'Bratislava': { 'Praha': 120, 'Brno': 90, 'Ostrava': 150 }
+    };
+    
+    // Zkusíme najít odhad, jinak použijeme default 60 minut
+    if (distances[startStation] && distances[startStation][endStation]) {
+        return distances[startStation][endStation];
+    }
+    return 60; // default 60 minut
+}
 
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
@@ -443,13 +513,43 @@ client.on('messageCreate', async message => {
             );
 
             if (hledanyVlak) {
-                // Spusť sledování jízdy
+                // Spusť sledování jízdy - nejdříve vytvoř live tracking embed
+                const estimatedDuration = getEstimatedDuration(hledanyVlak.StartStation, hledanyVlak.EndStation);
+                
+                // Vytvoř live tracking embed
+                const liveEmbed = new EmbedBuilder()
+                    .setColor('#ffff00')
+                    .setTitle(`🚂 Jízda vlaku ${hledanyVlak.TrainNoLocal}`)
+                    .setDescription(createProgressBar(0, estimatedDuration))
+                    .addFields(
+                        { name: '🚉 Trasa', value: `${hledanyVlak.StartStation} ──────●────── ${hledanyVlak.EndStation}`, inline: false },
+                        { name: '⏱️ Doba jízdy', value: `0/${estimatedDuration} minut`, inline: true },
+                        { name: '📍 Aktuálně', value: hledanyVlak.StartStation, inline: true },
+                        { name: '👤 Strojvůdce', value: message.author.toString(), inline: true }
+                    )
+                    .setThumbnail(message.author.displayAvatarURL())
+                    .setFooter({ text: `${hledanyVlak.TrainName || 'bez názvu'} • Live tracking` })
+                    .setTimestamp();
+
+                // Pošli live embed do kanálu aktivních jízd
+                let trackingMessage = null;
+                try {
+                    const activeRidesChannel = await client.channels.fetch(CONFIG.ACTIVE_RIDES_CHANNEL_ID);
+                    trackingMessage = await activeRidesChannel.send({ embeds: [liveEmbed] });
+                } catch (error) {
+                    console.error('Chyba při vytváření live tracking embedu:', error);
+                }
+
+                // Spusť sledování jízdy s live tracking daty
                 const jizda = {
                     vlakCislo: hledanyVlak.TrainNoLocal,
                     startCas: Date.now(),
                     startStanice: hledanyVlak.StartStation,
                     cilStanice: hledanyVlak.EndStation,
-                    trainName: hledanyVlak.TrainName || 'bez názvu'
+                    trainName: hledanyVlak.TrainName || 'bez názvu',
+                    estimatedDuration: estimatedDuration,
+                    trackingMessageId: trackingMessage ? trackingMessage.id : null,
+                    trackingChannelId: CONFIG.ACTIVE_RIDES_CHANNEL_ID
                 };
                 
                 aktivniJizdy.set(message.author.id, jizda);
@@ -568,6 +668,18 @@ client.on('messageCreate', async message => {
 
         // Zapiš jízdu do Google Sheets
         await zapisiJizduDoSheets(dokoncenaJizda, message.author.username);
+
+        // Smaž live tracking embed před ukončením jízdy
+        try {
+            if (aktivni.trackingMessageId && aktivni.trackingChannelId) {
+                const trackingChannel = await client.channels.fetch(aktivni.trackingChannelId);
+                const trackingMessage = await trackingChannel.messages.fetch(aktivni.trackingMessageId);
+                await trackingMessage.delete();
+                console.log(`🗑️ Smazán live tracking embed pro vlak ${aktivni.vlakCislo}`);
+            }
+        } catch (error) {
+            console.error('❌ Chyba při mazání live tracking embedu:', error);
+        }
 
         // Odstraň aktivní jízdu
         aktivniJizdy.delete(message.author.id);
