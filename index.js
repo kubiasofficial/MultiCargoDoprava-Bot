@@ -454,14 +454,30 @@ client.on('messageCreate', async message => {
                 
                 aktivniJizdy.set(message.author.id, jizda);
                 
-                // Pošli zprávu do centrálního kanálu
+                // Vytvoř krásný embed pro zahájení jízdy
+                const startEmbed = new EmbedBuilder()
+                    .setColor('#00ff00')
+                    .setTitle('🚂 Jízda zahájena!')
+                    .setDescription(`Vlak **${hledanyVlak.TrainNoLocal}** je nyní v provozu`)
+                    .addFields(
+                        { name: '🚉 Typ vlaku', value: hledanyVlak.TrainName || 'Bez názvu', inline: true },
+                        { name: '� Start', value: hledanyVlak.StartStation, inline: true },
+                        { name: '🎯 Cíl', value: hledanyVlak.EndStation, inline: true },
+                        { name: '👤 Strojvůdce', value: message.author.toString(), inline: false },
+                        { name: '⏰ Čas zahájení', value: `<t:${Math.floor(Date.now() / 1000)}:T>`, inline: true }
+                    )
+                    .setThumbnail(message.author.displayAvatarURL())
+                    .setFooter({ text: `Vlak č. ${hledanyVlak.TrainNoLocal}` })
+                    .setTimestamp();
+
+                // Pošli embed do centrálního kanálu
                 try {
                     const centralChannel = await client.channels.fetch(CONFIG.DISPATCHER_CHANNEL_ID);
-                    await centralChannel.send(`✅ Jízda vlaku **${hledanyVlak.TrainNoLocal}** (${hledanyVlak.TrainName || 'bez názvu'}) byla zahájena!\n🚉 **${hledanyVlak.StartStation}** → **${hledanyVlak.EndStation}**\n👤 Strojvůdce: **${message.author.username}**`);
+                    await centralChannel.send({ embeds: [startEmbed] });
                 } catch (error) {
                     console.error('Chyba při odesílání do centrálního kanálu:', error);
                     // Fallback do původního kanálu
-                    message.reply(`✅ Jízda vlaku **${hledanyVlak.TrainNoLocal}** (${hledanyVlak.TrainName || 'bez názvu'}) byla zahájena!\n🚉 **${hledanyVlak.StartStation}** → **${hledanyVlak.EndStation}**`);
+                    message.reply({ embeds: [startEmbed] });
                 }
             } else {
                 // Ukažme uživateli prvních 5 dostupných vlaků
@@ -556,14 +572,32 @@ client.on('messageCreate', async message => {
         // Odstraň aktivní jízdu
         aktivniJizdy.delete(message.author.id);
 
-        // Pošli zprávu do centrálního kanálu
+        // Vytvoř krásný embed pro ukončení jízdy
+        const endEmbed = new EmbedBuilder()
+            .setColor('#ff6b6b')
+            .setTitle('🏁 Jízda ukončena!')
+            .setDescription(`Vlak **${aktivni.vlakCislo}** úspěšně dokončil jízdu`)
+            .addFields(
+                { name: '🚉 Trasa', value: `${aktivni.startStanice} → ${aktivni.cilStanice}`, inline: false },
+                { name: '👤 Strojvůdce', value: message.author.toString(), inline: true },
+                { name: '⏰ Doba jízdy', value: `${dobaTrvani} minut`, inline: true },
+                { name: '💰 Získané body', value: `${ziskaneBody} bodů`, inline: true },
+                { name: '🏆 Celkové body', value: `${stats.celkoveBody} bodů`, inline: true },
+                { name: '🔥 Streak', value: `${stats.streak} jízd`, inline: true },
+                { name: '🎖️ Úroveň', value: novaUroven, inline: true }
+            )
+            .setThumbnail(message.author.displayAvatarURL())
+            .setFooter({ text: `Vlak č. ${aktivni.vlakCislo} • ${aktivni.trainName}` })
+            .setTimestamp();
+
+        // Pošli embed do centrálního kanálu
         try {
             const centralChannel = await client.channels.fetch(CONFIG.DISPATCHER_CHANNEL_ID);
-            await centralChannel.send(`🏁 Jízda vlaku **${aktivni.vlakCislo}** ukončena!\n👤 Strojvůdce: **${message.author.username}**\n⏰ Doba: **${dobaTrvani} minut**\n💰 Získané body: **${ziskaneBody}**\n🏆 Celkem: **${stats.celkoveBody} bodů** (${novaUroven})`);
+            await centralChannel.send({ embeds: [endEmbed] });
         } catch (error) {
             console.error('Chyba při odesílání do centrálního kanálu:', error);
             // Fallback do původního kanálu
-            message.reply(`🏁 Jízda vlaku **${aktivni.vlakCislo}** ukončena!\n⏰ Doba: **${dobaTrvani} minut**\n💰 Získané body: **${ziskaneBody}**\n🏆 Celkem: **${stats.celkoveBody} bodů** (${novaUroven})`);
+            message.reply({ embeds: [endEmbed] });
         }
     }
 
